@@ -6,8 +6,9 @@ from . import prompts
 from .llm import LLM
 
 PLAN_COUNTS = {"experience": 3, "technical": 2}
-_MAX_SOURCE_CHARS = 24000
-_MAX_JOB_CHARS = 12000
+# Korean is ~1 token per char for qwen; keep the prompt well inside NUM_CTX.
+_MAX_SOURCE_CHARS = 9000
+_MAX_JOB_CHARS = 4500
 
 
 def _list(v) -> list:

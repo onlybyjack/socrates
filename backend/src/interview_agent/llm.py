@@ -10,6 +10,10 @@ from typing import Protocol
 
 import httpx
 
+# One context size for every call: Ollama reloads the model when num_ctx changes.
+# 12k tokens ≈ 1.8GB KV cache for an 8B model, which still fits a 16GB Mac.
+NUM_CTX = 12288
+
 
 class LLMError(RuntimeError):
     pass
@@ -58,7 +62,7 @@ class OllamaLLM:
             "format": "json",
             "stream": False,
             "think": False,
-            "options": {"temperature": 0.3, "num_ctx": 16384},
+            "options": {"temperature": 0.3, "num_ctx": NUM_CTX},
         }
         last_err: Exception | None = None
         try:
@@ -86,7 +90,7 @@ class OllamaLLM:
             "messages": messages,
             "stream": True,
             "think": False,
-            "options": {"temperature": 0.7, "num_ctx": 16384},
+            "options": {"temperature": 0.7, "num_ctx": NUM_CTX},
         }
         try:
             async with self._client() as c:
@@ -123,3 +127,31 @@ class OllamaLLM:
         names = {m.get("name", "") for m in resp.json().get("models", [])}
         present = self.model in names or f"{self.model}:latest" in names
         return {"ok": True, "model_present": present}
+
+
+class GatedLLM:
+    """Runs LLM calls one at a time behind a lock shared with STT.
+
+    Whisper (mlx) and Ollama both use the Metal GPU. Running them at the same time can starve
+    WindowServer long enough for macOS to panic, so GPU work is serialized.
+    """
+
+    def __init__(self, inner, lock):
+        self.inner = inner
+        self.lock = lock
+
+    @property
+    def model(self) -> str:
+        return getattr(self.inner, "model", "")
+
+    async def chat_json(self, system: str, user: str) -> dict:
+        async with self.lock:
+            return await self.inner.chat_json(system, user)
+
+    async def stream_chat(self, messages: list[dict]) -> AsyncIterator[str]:
+        async with self.lock:
+            async for chunk in self.inner.stream_chat(messages):
+                yield chunk
+
+    async def check(self) -> dict:
+        return await self.inner.check()

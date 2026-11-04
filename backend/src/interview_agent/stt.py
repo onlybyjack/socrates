@@ -1,10 +1,15 @@
 """Speech-to-text."""
 
 import asyncio
+import io
 import re
-import tempfile
-from pathlib import Path
+import wave
+from math import gcd
 from typing import Protocol
+
+import numpy as np
+
+WHISPER_RATE = 16000
 
 # Phrases Whisper tends to invent on silence/noise (Korean YouTube-subtitle artifacts).
 _HALLUCINATIONS = [
@@ -26,41 +31,55 @@ def is_hallucination(text: str) -> bool:
     return any(re.sub(r"\s", "", h) in norm for h in _HALLUCINATIONS) and len(norm) < 30
 
 
+def load_wav_16k(data: bytes) -> np.ndarray:
+    """Decode a PCM16 WAV into mono float32 at 16 kHz.
+
+    Done in Python so the app never needs the ffmpeg binary (mlx-whisper shells out to ffmpeg for
+    file paths, and a Finder-launched .app has no Homebrew PATH).
+    """
+    with wave.open(io.BytesIO(data), "rb") as w:
+        if w.getsampwidth() != 2:
+            raise ValueError("16-bit PCM WAV만 지원해요.")
+        rate, channels = w.getframerate(), w.getnchannels()
+        pcm = np.frombuffer(w.readframes(w.getnframes()), dtype="<i2")
+    audio = pcm.astype(np.float32) / 32768.0
+    if channels > 1:
+        audio = audio.reshape(-1, channels).mean(axis=1)
+    if rate != WHISPER_RATE:
+        from scipy.signal import resample_poly
+
+        g = gcd(rate, WHISPER_RATE)
+        audio = resample_poly(audio, WHISPER_RATE // g, rate // g).astype(np.float32)
+    return audio
+
+
 class STT(Protocol):
     async def transcribe(self, wav: bytes) -> str: ...
 
 
 class MlxWhisperSTT:
-    def __init__(self, model: str):
+    def __init__(self, model: str, lock: asyncio.Lock | None = None):
         self.model = model
         self.ready = False
-        self._lock = asyncio.Lock()
+        self._lock = lock or asyncio.Lock()  # shared with the LLM so GPU work never overlaps
 
-    def _run(self, path: str) -> str:
+    def _run(self, audio: np.ndarray) -> str:
         import mlx_whisper  # heavy import, deferred
 
         result = mlx_whisper.transcribe(
-            path, path_or_hf_repo=self.model, language="ko", condition_on_previous_text=False
+            audio, path_or_hf_repo=self.model, language="ko", condition_on_previous_text=False
         )
         self.ready = True
         return str(result.get("text", "")).strip()
 
     async def transcribe(self, wav: bytes) -> str:
-        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
-            f.write(wav)
-            path = f.name
-        try:
-            async with self._lock:  # one transcription at a time on the GPU
-                text = await asyncio.to_thread(self._run, path)
-        finally:
-            Path(path).unlink(missing_ok=True)
+        audio = load_wav_16k(wav)
+        async with self._lock:
+            text = await asyncio.to_thread(self._run, audio)
         return "" if is_hallucination(text) else text
 
     async def warmup(self) -> None:
         """Download/load the model by transcribing 0.5s of silence."""
-        import io
-        import wave
-
         buf = io.BytesIO()
         with wave.open(buf, "wb") as w:
             w.setnchannels(1)

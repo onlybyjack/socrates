@@ -98,3 +98,26 @@ async def test_ollama_stream_error_line_raises():
     llm = OllamaLLM("http://ollama.test", "m", transport=httpx.MockTransport(lambda r: httpx.Response(200, text=lines)))
     with pytest.raises(LLMError, match="oom"):
         [c async for c in llm.stream_chat([{"role": "user", "content": "hi"}])]
+
+
+async def test_analyze_truncates_long_inputs_to_fit_context():
+    llm = FakeLLM(json_responses=[{}])
+    await analyze(llm, "뷁" * 50000, "갉" * 50000)
+    _, user = llm.json_calls[0]
+    assert user.count("뷁") == 9000 and user.count("갉") == 4500
+
+
+async def test_ollama_uses_single_context_size():
+    bodies = []
+
+    def handler(req):
+        bodies.append(json.loads(req.content))
+        if bodies[-1]["stream"]:
+            return httpx.Response(200, text=json.dumps({"message": {"content": "a"}, "done": True}))
+        return httpx.Response(200, json={"message": {"content": "{}"}})
+
+    llm = OllamaLLM("http://ollama.test", "m", transport=httpx.MockTransport(handler))
+    await llm.chat_json("s", "u")
+    [c async for c in llm.stream_chat([])]
+    # same num_ctx for both, or Ollama reloads the model between calls
+    assert {b["options"]["num_ctx"] for b in bodies} == {12288}
