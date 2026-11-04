@@ -609,6 +609,7 @@ dev = [
     { name = "pyinstaller" },
     { name = "pytest" },
     { name = "pytest-asyncio" },
+    { name = "websockets" },
 ]
 
 [package.metadata]
@@ -628,6 +629,7 @@ dev = [
     { name = "pyinstaller", specifier = ">=6.22.3" },
     { name = "pytest", specifier = ">=8" },
     { name = "pytest-asyncio", specifier = ">=0.24" },
+    { name = "websockets", specifier = ">=17.4" },
 ]
 
 [[package]]
