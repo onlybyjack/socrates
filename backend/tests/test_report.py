@@ -48,3 +48,12 @@ async def test_report_with_no_questions_skips_llm():
     llm = FakeLLM()
     rep = await make_report(llm, {}, [])
     assert rep["questions"] == [] and llm.json_calls == []
+
+
+def test_pair_questions_repeat_keeps_pending():
+    turns = [
+        {"role": "interviewer", "text": "Q1", "stage": "intro", "kind": "main"},
+        {"role": "interviewer", "text": "다시 말씀해 주시겠어요?", "stage": "intro", "kind": "repeat"},
+        {"role": "candidate", "text": "A1", "stage": "intro", "kind": "answer"},
+    ]
+    assert pair_questions(turns) == [{"question": "Q1", "answer": "A1", "kind": "main"}]

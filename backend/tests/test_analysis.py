@@ -71,3 +71,30 @@ async def test_ollama_stream_chat_yields_content():
     llm = OllamaLLM("http://ollama.test", "m", transport=httpx.MockTransport(handler))
     out = [c async for c in llm.stream_chat([{"role": "user", "content": "hi"}])]
     assert "".join(out) == "안녕하세요"
+
+
+async def test_ollama_http_500_raises_llmerror():
+    handler = lambda req: httpx.Response(500, json={"error": "model requires more system memory"})
+    llm = OllamaLLM("http://ollama.test", "m", transport=httpx.MockTransport(handler))
+    with pytest.raises(LLMError, match="memory"):
+        await llm.chat_json("s", "u")
+    with pytest.raises(LLMError):
+        [c async for c in llm.stream_chat([{"role": "user", "content": "hi"}])]
+
+
+async def test_ollama_read_error_mapped_to_llmerror():
+    def handler(req):
+        raise httpx.ReadTimeout("slow", request=req)
+
+    llm = OllamaLLM("http://ollama.test", "m", transport=httpx.MockTransport(handler))
+    with pytest.raises(LLMError):
+        await llm.chat_json("s", "u")
+    with pytest.raises(LLMError):
+        [c async for c in llm.stream_chat([{"role": "user", "content": "hi"}])]
+
+
+async def test_ollama_stream_error_line_raises():
+    lines = json.dumps({"message": {"content": "안"}, "done": False}) + "\n" + json.dumps({"error": "oom"})
+    llm = OllamaLLM("http://ollama.test", "m", transport=httpx.MockTransport(lambda r: httpx.Response(200, text=lines)))
+    with pytest.raises(LLMError, match="oom"):
+        [c async for c in llm.stream_chat([{"role": "user", "content": "hi"}])]

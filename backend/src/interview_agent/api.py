@@ -188,8 +188,9 @@ def create_app(llm: LLM, stt: STT, tts: TTSEngine, store: Store) -> FastAPI:
                 try:
                     rep = await make_report(llm, s["analysis"], store.get_turns(sid))
                     store.update_session(sid, report=rep)
-                except LLMError as e:
-                    log.warning("report failed: %s", e)
+                except Exception as e:  # never leave the UI waiting on "reporting"
+                    log.exception("report failed")
+                    await send_json({"type": "error", "message": f"피드백을 만들지 못했어요. 기록 화면에서 다시 만들 수 있어요. ({e})"})
                 await send_json({"type": "finished", "session_id": sid})
 
         async def handle_answer(text: str) -> None:
@@ -209,7 +210,13 @@ def create_app(llm: LLM, stt: STT, tts: TTSEngine, store: Store) -> FastAPI:
                         if orch.finished:
                             continue
                         await send_json({"type": "state", "stage": orch.stage, "transcribing": True})
-                        await handle_answer(await stt.transcribe(msg["bytes"]))
+                        try:
+                            heard = await stt.transcribe(msg["bytes"])
+                        except Exception as e:
+                            log.exception("STT failed")
+                            await send_json({"type": "error", "message": f"받아쓰기에 실패했어요. 다시 말하거나 답변을 입력해 주세요. ({e})"})
+                            continue
+                        await handle_answer(heard)
                         continue
                     data = json.loads(msg.get("text") or "{}")
                     kind = data.get("type")
@@ -223,7 +230,13 @@ def create_app(llm: LLM, stt: STT, tts: TTSEngine, store: Store) -> FastAPI:
                     await send_json({"type": "error", "message": OLLAMA_DOWN})
                 except LLMError as e:
                     await send_json({"type": "error", "message": f"면접관 응답을 만들지 못했어요: {e}"})
-        except WebSocketDisconnect:
-            pass
+                except WebSocketDisconnect:
+                    raise
+                except Exception as e:  # keep the interview alive; the UI returns to listening
+                    log.exception("interview turn failed")
+                    await send_json({"type": "error", "message": f"문제가 생겼어요. 다시 답변해 주세요. ({e})"})
+        except (WebSocketDisconnect, RuntimeError) as e:
+            if isinstance(e, RuntimeError) and "disconnect" not in str(e).lower():
+                raise
 
     return app

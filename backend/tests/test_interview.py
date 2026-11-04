@@ -32,7 +32,7 @@ async def test_empty_answer_asks_repeat_no_state_change():
     text = await collect(o.respond("   "))
     assert text == REPEAT_PROMPT
     assert (o.stage, o.main_index, o.follow_ups, len(o.history)) == before
-    assert o.last_kind == "other"
+    assert o.last_kind == "repeat"
 
 
 async def test_tag_stripped_from_output():
@@ -136,3 +136,21 @@ def test_tag_stripper_drops_whitespace_after_early_tag():
     out = t.feed("[NEXT]") + t.feed("  \n") + t.feed("안녕하세요.")
     assert out == "안녕하세요."
     assert t.tag == "NEXT"
+
+
+async def test_empty_llm_turn_raises_and_keeps_stage():
+    import pytest
+    from interview_agent.llm import LLMError
+
+    o = make(FakeLLM(stream_responses=["[NEXT]\n인사", "[NEXT]\n"]))
+    await collect(o.opening())
+    with pytest.raises(LLMError):
+        await collect(o.respond("답변"))
+    assert o.stage == "intro" and o.main_index == 1
+
+
+async def test_repeat_prompt_kind_is_repeat():
+    o = make(FakeLLM())
+    await collect(o.opening())
+    await collect(o.respond(""))
+    assert o.last_kind == "repeat"

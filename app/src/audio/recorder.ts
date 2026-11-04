@@ -61,7 +61,13 @@ export class Recorder {
     this.segments = [];
     this.active = true;
     this.onState("waiting");
-    await this.vad?.start();
+    try {
+      await this.vad?.start();
+    } catch (e) {
+      this.active = false;
+      this.onState("off");
+      throw e;
+    }
   }
 
   /** Stop listening and drop anything captured (used while the interviewer is talking). */

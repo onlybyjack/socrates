@@ -176,3 +176,47 @@ def test_ws_not_analyzed_errors(tmp_path):
     with c.websocket_connect(f"/ws/interview/{sid}") as ws:
         m = ws.receive_json()
         assert m["type"] == "error"
+
+
+class BoomSTT(FakeSTT):
+    async def transcribe(self, wav):
+        raise RuntimeError("mlx exploded")
+
+
+class ReportBoomLLM(FakeLLM):
+    async def chat_json(self, system, user):
+        raise RuntimeError("unexpected")
+
+
+def test_ws_stt_failure_sends_error_and_keeps_socket(tmp_path):
+    c, store = make_client(tmp_path, stt=BoomSTT())
+    sid = ready_session(store)
+    with c.websocket_connect(f"/ws/interview/{sid}") as ws:
+        ws.send_json({"type": "start"})
+        _drain_turn(ws)
+        ws.send_bytes(b"RIFF")
+        msgs = _drain_turn(ws)
+        assert msgs[-1]["type"] == "error"
+        ws.send_json({"type": "text_answer", "text": "타이핑 답변"})
+        msgs = _drain_turn(ws)
+        assert msgs[-1]["type"] == "turn_done"
+
+
+def test_ws_report_failure_still_finishes(tmp_path):
+    llm = ReportBoomLLM(stream_responses=["[NEXT]\n자기소개 부탁드립니다.", "[NEXT]\n수고하셨습니다."])
+    c, store = make_client(tmp_path, llm=llm)
+    sid = ready_session(store)
+    with c.websocket_connect(f"/ws/interview/{sid}") as ws:
+        ws.send_json({"type": "start"})
+        _drain_turn(ws)
+        ws.send_json({"type": "text_answer", "text": "답변"})
+        _drain_turn(ws)
+        ws.send_json({"type": "end_interview"})
+        _drain_turn(ws)
+        types = []
+        while True:
+            m = ws.receive_json()
+            types.append(m["type"])
+            if m["type"] == "finished":
+                break
+        assert "error" in types

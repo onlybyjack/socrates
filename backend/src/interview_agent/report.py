@@ -14,6 +14,8 @@ def pair_questions(turns: list[dict]) -> list[dict]:
     pending: dict | None = None
     for t in turns:
         if t["role"] == "interviewer":
+            if t["kind"] == "repeat":  # "please say that again" keeps the open question open
+                continue
             pending = (
                 {"question": t["text"], "answer": "", "kind": t["kind"]}
                 if t["kind"] in ("main", "follow_up")

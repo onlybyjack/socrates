@@ -44,6 +44,8 @@ export function InterviewScreen({ sessionId, analysis, onFinished, onLeave }: Pr
   const queue = useRef<AudioQueue | null>(null);
   const recorder = useRef<Recorder | null>(null);
   const micReady = useRef(false);
+  const [micOk, setMicOk] = useState(false);
+  const leaving = useRef(false);
   const turnDone = useRef(false);
   const finished = useRef(false);
   const newTurn = useRef(true);
@@ -54,7 +56,13 @@ export function InterviewScreen({ sessionId, analysis, onFinished, onLeave }: Pr
   const startListening = useCallback(() => {
     if (finished.current) return;
     setPhase("listening");
-    if (micReady.current) recorder.current?.start();
+    if (!micReady.current) return;
+    // getUserMedia runs here (not at init), so a denied permission surfaces now.
+    recorder.current?.start().catch(() => {
+      micReady.current = false;
+      setMicOk(false);
+      setMicError("마이크를 쓸 수 없어요. 시스템 설정에서 마이크 권한을 허용하거나, 아래 입력칸에 답변을 입력하세요.");
+    });
   }, []);
 
   // When the turn text is complete and all audio has played, hand the floor to the candidate.
@@ -80,13 +88,20 @@ export function InterviewScreen({ sessionId, analysis, onFinished, onLeave }: Pr
     };
     rec
       .init()
-      .then(() => (micReady.current = true))
+      .then(() => {
+        micReady.current = true;
+        setMicOk(true);
+      })
       .catch(() => setMicError("마이크를 쓸 수 없어요. 시스템 설정에서 마이크 권한을 허용하거나, 아래 입력칸에 답변을 입력하세요."));
 
     const sock = api.openInterview(sessionId);
     ws.current = sock;
     sock.onopen = () => sock.send(JSON.stringify({ type: "start" }));
     sock.onclose = () => {
+      if (leaving.current) return;
+      // Interview already over (e.g. report failed and the socket dropped): go to the report screen,
+      // which can rebuild feedback from the saved turns.
+      if (finished.current) return onFinishedRef.current();
       if (!finished.current) setError("백엔드와 연결이 끊겼어요. 백엔드가 실행 중인지 확인해 주세요.");
     };
     sock.onmessage = (ev) => {
@@ -140,6 +155,7 @@ export function InterviewScreen({ sessionId, analysis, onFinished, onLeave }: Pr
     };
 
     return () => {
+      leaving.current = true;
       finished.current = true;
       sock.close();
       rec.destroy();
@@ -249,7 +265,7 @@ export function InterviewScreen({ sessionId, analysis, onFinished, onLeave }: Pr
 
       <div className="controls">
         <span className="status-pill">{STATUS[phase]}</span>
-        {(micError || !micReady.current) && (
+        {(micError || !micOk) && (
           <div className="typing">
             <input
               type="text"

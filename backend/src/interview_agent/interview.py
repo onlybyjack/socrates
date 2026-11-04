@@ -5,7 +5,7 @@ import re
 from collections.abc import AsyncIterator
 
 from . import prompts
-from .llm import LLM
+from .llm import LLM, LLMError
 
 STAGES = ["intro", "motivation", "experience", "technical", "reverse_qa", "closing"]
 _MAIN_COUNTS = {"intro": 1, "motivation": 1, "experience": 3, "technical": 2}
@@ -85,7 +85,7 @@ class Orchestrator:
         if self.finished:
             return
         if not answer.strip():
-            self.last_kind = "other"
+            self.last_kind = "repeat"
             yield prompts.REPEAT_PROMPT
             return
         self.history.append({"role": "user", "content": answer.strip()})
@@ -192,5 +192,7 @@ class Orchestrator:
             said.append(tail)
             yield tail
         text = "".join(said).strip()
-        if text:
-            self.history.append({"role": "assistant", "content": text})
+        if not text:
+            # Raise before the caller advances any state, so a planned question is never skipped.
+            raise LLMError("면접관 응답이 비어 있어요.")
+        self.history.append({"role": "assistant", "content": text})
