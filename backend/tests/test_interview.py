@@ -129,3 +129,10 @@ def test_tag_stripper_short_untagged_flush():
     assert t.feed("네.") == ""
     assert t.flush() == "네."
     assert t.tag is None
+
+
+def test_tag_stripper_drops_whitespace_after_early_tag():
+    t = TagStripper()
+    out = t.feed("[NEXT]") + t.feed("  \n") + t.feed("안녕하세요.")
+    assert out == "안녕하세요."
+    assert t.tag == "NEXT"

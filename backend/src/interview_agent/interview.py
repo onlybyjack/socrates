@@ -21,10 +21,14 @@ class TagStripper:
     def __init__(self) -> None:
         self._buf = ""
         self._decided = False
+        self._started = False  # has any non-whitespace text been emitted
         self.tag: str | None = None
 
     def feed(self, delta: str) -> str:
         if self._decided:
+            if not self._started:
+                delta = delta.lstrip()
+                self._started = bool(delta)
             return delta
         self._buf += delta
         if "\n" not in self._buf and len(self._buf) < self._DECIDE_AT:
@@ -38,11 +42,11 @@ class TagStripper:
     def _decide(self) -> str:
         self._decided = True
         m = _TAG_RE.match(self._buf)
+        out = self._buf[m.end():] if m else self._buf
         if m:
             self.tag = m.group(1)
-            out = self._buf[m.end():]
-        else:
-            out = self._buf.lstrip()
+        out = out.lstrip()
+        self._started = bool(out)
         self._buf = ""
         return out
 
@@ -62,9 +66,11 @@ class Orchestrator:
         self.last_kind = "other"
         self.history: list[dict] = []
         job = analysis.get("job", {}) or {}
+        self._company = job.get("company") or "지원한 회사"
+        self._role = job.get("role") or "지원 직무"
         self._system = prompts.INTERVIEWER_SYSTEM.format(
-            company=job.get("company") or "지원한 회사",
-            role=job.get("role") or "지원 직무",
+            company=self._company,
+            role=self._role,
             analysis=json.dumps(analysis, ensure_ascii=False),
         )
 
@@ -72,7 +78,7 @@ class Orchestrator:
     async def opening(self) -> AsyncIterator[str]:
         self.stage, self.main_index, self.follow_ups = "intro", 1, 0
         self.last_kind = "main"
-        async for chunk in self._speak(prompts.OPENING_INSTRUCTION):
+        async for chunk in self._speak(prompts.OPENING_INSTRUCTION.format(company=self._company, role=self._role)):
             yield chunk
 
     async def respond(self, answer: str) -> AsyncIterator[str]:
