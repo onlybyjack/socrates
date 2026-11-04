@@ -16,6 +16,7 @@ export interface Health {
   stt: boolean;
   stt_ready: boolean;
   tts: boolean;
+  pull: { status: "idle" | "pulling" | "done" | "error"; completed: number; total: number; message: string };
 }
 
 export interface Point {

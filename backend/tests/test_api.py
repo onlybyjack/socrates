@@ -220,3 +220,37 @@ def test_ws_report_failure_still_finishes(tmp_path):
             if m["type"] == "finished":
                 break
         assert "error" in types
+
+
+def _wait_pull(c, want):
+    import time
+
+    for _ in range(100):
+        body = c.get("/api/health").json()
+        if body["pull"]["status"] == want:
+            return body
+        time.sleep(0.01)
+    raise AssertionError(body)
+
+
+def test_model_pull_runs_in_background_and_reports_progress(tmp_path):
+    from fakes import PullingLLM
+
+    llm = PullingLLM()
+    c, _ = make_client(tmp_path, llm=llm)
+    assert c.get("/api/health").json()["pull"]["status"] == "idle"
+    r = c.post("/api/model/pull")
+    assert r.status_code == 200
+    body = _wait_pull(c, "done")
+    assert body["model_present"] is True and body["pull"]["completed"] == 10
+    c.post("/api/model/pull")  # already present → no second download
+    assert llm.pulls == 1
+
+
+def test_model_pull_failure_is_reported(tmp_path):
+    from fakes import PullingLLM
+
+    c, _ = make_client(tmp_path, llm=PullingLLM(fail=True))
+    c.post("/api/model/pull")
+    body = _wait_pull(c, "error")
+    assert "disk full" in body["pull"]["message"]

@@ -36,6 +36,7 @@ const json = (body: unknown): RequestInit => ({
 
 export const api = {
   health: () => request<Health>("/api/health"),
+  pullModel: () => request<Health["pull"]>("/api/model/pull", { method: "POST" }),
   createSession: (files: File[], jobUrl?: string, jobText?: string) => {
     const fd = new FormData();
     files.forEach((f) => fd.append("files", f));

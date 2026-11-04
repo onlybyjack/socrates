@@ -44,3 +44,26 @@ class FakeTTS:
 
     async def synthesize(self, text: str) -> tuple[bytes, str]:
         return b"RIFF" + text.encode(), "audio/wav"
+
+
+class PullingLLM(FakeLLM):
+    """FakeLLM whose model is missing until pull() finishes."""
+
+    def __init__(self, fail: bool = False, **kw):
+        super().__init__(**kw)
+        self.present = False
+        self.fail = fail
+        self.pulls = 0
+
+    async def check(self) -> dict:
+        return {"ok": True, "model_present": self.present}
+
+    async def pull(self, on_progress) -> None:
+        self.pulls += 1
+        on_progress("downloading", 5, 10)
+        if self.fail:
+            from interview_agent.llm import LLMError
+
+            raise LLMError("disk full")
+        on_progress("success", 10, 10)
+        self.present = True

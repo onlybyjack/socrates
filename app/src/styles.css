@@ -223,3 +223,29 @@ textarea { min-height: 180px; resize: vertical; }
 @media (prefers-reduced-motion: reduce) {
   * { transition: none !important; animation: none !important; }
 }
+
+/* ---------- splash ---------- */
+.splash {
+  position: fixed; inset: 0; background: var(--room); color: var(--room-ink);
+  display: grid; place-items: center; padding: 24px; color-scheme: dark;
+}
+.splash-inner { width: min(460px, 100%); display: grid; gap: 14px; }
+.splash-title { font-size: 34px; letter-spacing: -0.03em; }
+.splash-sub { color: var(--room-muted); margin-top: -6px; }
+.splash-bar { height: 4px; border-radius: 999px; background: rgba(255,255,255,0.1); overflow: hidden; margin-top: 18px; }
+.splash-bar span { display: block; height: 100%; background: var(--listen); transition: width 400ms ease; }
+.splash-now { font-size: 14px; color: var(--room-ink); min-height: 1.6em; }
+.splash-steps { list-style: none; margin: 8px 0 0; padding: 0; display: grid; gap: 12px; }
+.splash-steps li { display: grid; grid-template-columns: 22px 1fr; gap: 10px; color: var(--room-muted); font-size: 14px; }
+.splash-steps li.done, .splash-steps li.active, .splash-steps li.blocked { color: var(--room-ink); }
+.splash-steps .mark {
+  width: 18px; height: 18px; margin-top: 3px; border-radius: 50%; display: grid; place-items: center;
+  font-size: 11px; border: 1.5px solid rgba(255,255,255,0.25);
+}
+.splash-steps li.done .mark { background: var(--listen); border-color: var(--listen); color: #08221b; }
+.splash-steps li.active .mark { border-color: var(--listen); border-top-color: transparent; animation: spin 900ms linear infinite; }
+.splash-steps li.blocked .mark { background: var(--speak); border-color: var(--speak); color: #2a1d00; font-weight: 700; }
+.splash-steps .detail { color: var(--room-muted); font-size: 13px; margin-top: 2px; }
+.splash-steps .btn { margin-top: 8px; background: rgba(255,255,255,0.1); border-color: transparent; color: var(--room-ink); }
+.splash-dev { font-size: 12px; color: var(--room-muted); }
+@keyframes spin { to { transform: rotate(360deg); } }

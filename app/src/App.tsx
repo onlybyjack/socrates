@@ -1,6 +1,6 @@
 import { useReducer } from "react";
 import type { Analysis, Plan } from "./types";
-import { HealthScreen } from "./screens/Health";
+import { SplashScreen } from "./screens/Splash";
 import { SetupScreen } from "./screens/Setup";
 import { AnalysisScreen } from "./screens/Analysis";
 import { InterviewScreen } from "./screens/Interview";
@@ -8,7 +8,7 @@ import { ReportScreen } from "./screens/Report";
 import { HistoryScreen } from "./screens/History";
 
 export type Screen =
-  | { name: "health" }
+  | { name: "splash" }
   | { name: "setup" }
   | { name: "analysis"; sessionId: string; analysis: Analysis; plan: Plan }
   | { name: "interview"; sessionId: string; analysis: Analysis }
@@ -20,7 +20,11 @@ function reducer(_: Screen, next: Screen): Screen {
 }
 
 export default function App() {
-  const [screen, go] = useReducer(reducer, { name: "health" });
+  const [screen, go] = useReducer(reducer, { name: "splash" });
+
+  if (screen.name === "splash") {
+    return <SplashScreen onReady={() => go({ name: "setup" })} />;
+  }
 
   if (screen.name === "interview") {
     return (
@@ -49,7 +53,6 @@ export default function App() {
         </nav>
       </header>
       <main className="page">
-        {screen.name === "health" && <HealthScreen onReady={() => go({ name: "setup" })} />}
         {screen.name === "setup" && (
           <SetupScreen onAnalyzed={(sessionId, analysis, plan) => go({ name: "analysis", sessionId, analysis, plan })} />
         )}

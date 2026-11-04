@@ -121,3 +121,23 @@ async def test_ollama_uses_single_context_size():
     [c async for c in llm.stream_chat([])]
     # same num_ctx for both, or Ollama reloads the model between calls
     assert {b["options"]["num_ctx"] for b in bodies} == {12288}
+
+
+async def test_ollama_pull_reports_progress():
+    lines = "\n".join(json.dumps(x) for x in [
+        {"status": "pulling manifest"},
+        {"status": "downloading", "completed": 50, "total": 100},
+        {"status": "downloading", "completed": 100, "total": 100},
+        {"status": "success"},
+    ])
+    seen = []
+    llm = OllamaLLM("http://ollama.test", "qwen3:8b", transport=httpx.MockTransport(lambda r: httpx.Response(200, text=lines)))
+    await llm.pull(lambda status, done, total: seen.append((status, done, total)))
+    assert ("downloading", 50, 100) in seen and seen[-1][0] == "success"
+
+
+async def test_ollama_pull_error_line_raises():
+    llm = OllamaLLM("http://ollama.test", "nope", transport=httpx.MockTransport(
+        lambda r: httpx.Response(200, text=json.dumps({"error": "pull model manifest: file does not exist"}))))
+    with pytest.raises(LLMError, match="manifest"):
+        await llm.pull(lambda *a: None)

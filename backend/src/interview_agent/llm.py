@@ -117,6 +117,28 @@ class OllamaLLM:
         except httpx.HTTPError as e:
             raise LLMError(f"Ollama 통신 오류: {e!r}") from e
 
+    async def pull(self, on_progress) -> None:
+        """Download the model through Ollama, reporting (status, completed_bytes, total_bytes)."""
+        try:
+            async with httpx.AsyncClient(
+                base_url=self.base_url, transport=self._transport, timeout=httpx.Timeout(None, connect=5)
+            ) as c:
+                async with c.stream("POST", "/api/pull", json={"model": self.model, "stream": True}) as resp:
+                    if resp.status_code >= 400:
+                        await resp.aread()
+                        raise LLMError(f"모델을 내려받지 못했어요: {_error_detail(resp)}")
+                    async for line in resp.aiter_lines():
+                        if not line.strip():
+                            continue
+                        chunk = json.loads(line)
+                        if chunk.get("error"):
+                            raise LLMError(f"모델을 내려받지 못했어요: {chunk['error']}")
+                        on_progress(chunk.get("status", ""), int(chunk.get("completed") or 0), int(chunk.get("total") or 0))
+        except httpx.ConnectError as e:
+            raise LLMUnavailable(str(e)) from e
+        except httpx.HTTPError as e:
+            raise LLMError(f"Ollama 통신 오류: {e!r}") from e
+
     async def check(self) -> dict:
         try:
             async with self._client() as c:
@@ -155,3 +177,7 @@ class GatedLLM:
 
     async def check(self) -> dict:
         return await self.inner.check()
+
+    async def pull(self, on_progress) -> None:
+        # Network/disk only, no GPU: not gated.
+        await self.inner.pull(on_progress)

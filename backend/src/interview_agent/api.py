@@ -37,6 +37,22 @@ def create_app(llm: LLM, stt: STT, tts: TTSEngine, store: Store) -> FastAPI:
         allow_headers=["*"],
     )
 
+    pull_state: dict = {"status": "idle", "completed": 0, "total": 0, "message": ""}
+    pull_tasks: set[asyncio.Task] = set()
+
+    async def _run_pull() -> None:
+        def progress(status: str, done: int, total: int) -> None:
+            pull_state.update(message=status)
+            if total:
+                pull_state.update(completed=done, total=total)
+
+        try:
+            await llm.pull(progress)
+            pull_state.update(status="done")
+        except Exception as e:
+            log.exception("model pull failed")
+            pull_state.update(status="error", message=str(e))
+
     def _session(sid: str) -> dict:
         s = store.get_session(sid)
         if s is None:
@@ -54,7 +70,24 @@ def create_app(llm: LLM, stt: STT, tts: TTSEngine, store: Store) -> FastAPI:
             "stt": True,
             "stt_ready": getattr(stt, "ready", True),
             "tts": tts.available(),
+            "pull": dict(pull_state),
         }
+
+    @app.post("/api/model/pull")
+    async def pull_model():
+        if pull_state["status"] == "pulling":
+            return dict(pull_state)
+        chk = await llm.check()
+        if not chk["ok"]:
+            raise HTTPException(503, "Ollama가 실행 중이 아니에요.")
+        if chk["model_present"]:
+            pull_state.update(status="done")
+            return dict(pull_state)
+        pull_state.update(status="pulling", completed=0, total=0, message="")
+        task = asyncio.create_task(_run_pull())
+        pull_tasks.add(task)
+        task.add_done_callback(pull_tasks.discard)
+        return dict(pull_state)
 
     @app.post("/api/sessions")
     async def create_session(
