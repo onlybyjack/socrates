@@ -102,7 +102,7 @@ export function InterviewScreen({ sessionId, analysis, onFinished, onLeave }: Pr
       // Interview already over (e.g. report failed and the socket dropped): go to the report screen,
       // which can rebuild feedback from the saved turns.
       if (finished.current) return onFinishedRef.current();
-      if (!finished.current) setError("백엔드와 연결이 끊겼어요. 백엔드가 실행 중인지 확인해 주세요.");
+      if (!finished.current) setError("면접 엔진과 연결이 끊겼어요. 지금까지의 대화는 저장돼 있어요. 앱을 다시 열고 지난 면접에서 피드백을 확인하세요.");
     };
     sock.onmessage = (ev) => {
       if (ev.data instanceof ArrayBuffer) {

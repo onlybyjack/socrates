@@ -10,19 +10,35 @@ export function HealthScreen({ onReady }: Props) {
   const [health, setHealth] = useState<Health | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  const [starting, setStarting] = useState(true);
+
   const check = useCallback(async () => {
     setError(null);
     try {
       const h = await api.health();
       setHealth(h);
+      setStarting(false);
       if (h.ollama && h.model_present && h.tts) onReady();
+      return true;
     } catch (e) {
       setError((e as Error).message);
+      return false;
     }
   }, [onReady]);
 
+  // The packaged app launches the backend itself; it needs a few seconds to come up.
   useEffect(() => {
-    check();
+    let cancelled = false;
+    (async () => {
+      for (let i = 0; i < 40 && !cancelled; i++) {
+        if (await check()) return;
+        await new Promise((r) => setTimeout(r, 1500));
+      }
+      if (!cancelled) setStarting(false);
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, [check]);
 
   const model = health?.model || "qwen3:8b";
@@ -32,12 +48,22 @@ export function HealthScreen({ onReady }: Props) {
         <h1>시작하기 전에 확인할게요</h1>
         <p className="lede">면접관 음성, 받아쓰기, 질문 생성이 모두 이 맥에서 돌아가요. 아래 항목이 준비되면 바로 시작할 수 있어요.</p>
       </div>
-      {error && (
+      {starting && !health && <p className="hint">면접 엔진을 켜는 중이에요…</p>}
+      {error && !starting && (
         <div className="notice">
-          <p className="error">{error}</p>
-          <p>
-            <code>cd backend && uv run python -m interview_agent</code>
-          </p>
+          {import.meta.env.DEV ? (
+            <>
+              <p className="error">{error}</p>
+              <p>
+                개발 모드에서는 백엔드를 직접 켜야 해요: <code>cd backend && uv run python -m interview_agent</code>
+              </p>
+            </>
+          ) : (
+            <>
+              <p className="error">면접 엔진을 켜지 못했어요.</p>
+              <p className="hint">앱을 완전히 종료했다가 다시 열어 주세요. 계속 안 되면 ~/Library/Logs/interview-agent/backend.log 내용을 이슈에 남겨 주세요.</p>
+            </>
+          )}
         </div>
       )}
       {health && (

@@ -2,11 +2,13 @@
 
 import asyncio
 import logging
+import os
 
 import uvicorn
 
 from .api import create_app
 from .config import get_settings
+from .parent_watch import watch_parent
 from .llm import GatedLLM, OllamaLLM
 from .store import Store
 from .stt import MlxWhisperSTT
@@ -15,6 +17,8 @@ from .tts import MacSayTTS
 
 def main() -> None:
     logging.basicConfig(level=logging.INFO)
+    if parent := os.environ.get("IA_PARENT_PID"):
+        watch_parent(int(parent))
     s = get_settings()
     gpu = asyncio.Lock()  # Whisper and Ollama share the GPU; never run them at the same time
     stt = MlxWhisperSTT(s.stt_model, lock=gpu)

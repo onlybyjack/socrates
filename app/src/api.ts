@@ -13,7 +13,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   try {
     res = await fetch(BASE + path, init);
   } catch {
-    throw new ApiError(0, "백엔드에 연결할 수 없어요. 터미널에서 백엔드를 실행했는지 확인해 주세요.");
+    throw new ApiError(0, "면접 엔진에 연결할 수 없어요. 앱을 종료했다가 다시 열어 주세요.");
   }
   if (!res.ok) {
     let detail = `요청이 실패했어요 (${res.status})`;
