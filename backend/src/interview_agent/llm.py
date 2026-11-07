@@ -1,19 +1,20 @@
-"""Ollama chat client.
+"""LLM client: the model runs in this process on Apple Silicon (mlx-lm), so the app needs nothing else installed.
 
-Every failure surfaces as LLMError (or its subclass LLMUnavailable when Ollama can't be reached or the
-model is missing), so callers never see raw httpx/json exceptions.
+Every failure surfaces as LLMError (or its subclass LLMUnavailable when the model is missing or can't be
+loaded), so callers never see raw mlx/json exceptions.
 """
 
+import asyncio
 import json
+import logging
+import re
+import threading
 from collections.abc import AsyncIterator
+from pathlib import Path
 from typing import Protocol
 
-import httpx
-
-# One context size for every call: Ollama reloads the model when num_ctx changes.
-# 12k tokens ≈ 1.8GB KV cache for an 8B model, which still fits a 16GB Mac.
-NUM_CTX = 12288
-
+log = logging.getLogger("interview_agent")
+DEFAULT_MLX_MODEL = "mlx-community/Qwen3-8B-4bit"
 
 class LLMError(RuntimeError):
     pass
@@ -29,132 +30,189 @@ class LLM(Protocol):
     def stream_chat(self, messages: list[dict]) -> AsyncIterator[str]: ...
 
 
-def _error_detail(resp: httpx.Response) -> str:
-    try:
-        return str(resp.json().get("error") or resp.text)
-    except (json.JSONDecodeError, AttributeError):
-        return resp.text
+_THINK_RE = re.compile(r"<think>.*?</think>", re.S)
 
 
-class OllamaLLM:
-    def __init__(self, base_url: str, model: str, transport: httpx.AsyncBaseTransport | None = None):
-        self.base_url = base_url.rstrip("/")
-        self.model = model
-        self._transport = transport
-
-    def _client(self) -> httpx.AsyncClient:
-        return httpx.AsyncClient(
-            base_url=self.base_url,
-            transport=self._transport,
-            timeout=httpx.Timeout(300, connect=5),
-        )
-
-    def _check_status(self, resp: httpx.Response, detail: str | None = None) -> None:
-        if resp.status_code == 404:
-            raise LLMUnavailable(f"모델을 찾을 수 없어요: {self.model}")
-        if resp.status_code >= 400:
-            raise LLMError(f"Ollama 오류 ({resp.status_code}): {detail if detail is not None else _error_detail(resp)}")
-
-    async def chat_json(self, system: str, user: str) -> dict:
-        body = {
-            "model": self.model,
-            "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}],
-            "format": "json",
-            "stream": False,
-            "think": False,
-            "options": {"temperature": 0.3, "num_ctx": NUM_CTX},
-        }
-        last_err: Exception | None = None
-        try:
-            async with self._client() as c:
-                for _ in range(2):
-                    resp = await c.post("/api/chat", json=body)
-                    self._check_status(resp)
-                    content = resp.json().get("message", {}).get("content", "")
+def extract_json(text: str) -> dict | None:
+    """The first JSON object in a model reply (tolerates <think> blocks, code fences, chatter)."""
+    text = _THINK_RE.sub("", text)
+    start = text.find("{")
+    while start != -1:
+        depth, in_str, esc = 0, False, False
+        for i in range(start, len(text)):
+            ch = text[i]
+            if in_str:
+                if esc:
+                    esc = False
+                elif ch == "\\":
+                    esc = True
+                elif ch == '"':
+                    in_str = False
+            elif ch == '"':
+                in_str = True
+            elif ch == "{":
+                depth += 1
+            elif ch == "}":
+                depth -= 1
+                if depth == 0:
                     try:
-                        data = json.loads(content)
-                        if isinstance(data, dict):
-                            return data
-                        last_err = LLMError("JSON object expected")
-                    except json.JSONDecodeError as e:
-                        last_err = e
-        except httpx.ConnectError as e:
-            raise LLMUnavailable(str(e)) from e
-        except httpx.HTTPError as e:
-            raise LLMError(f"Ollama 통신 오류: {e!r}") from e
-        raise LLMError(f"LLM이 올바른 JSON을 돌려주지 않았어요: {last_err}")
+                        data = json.loads(text[start : i + 1])
+                    except json.JSONDecodeError:
+                        break
+                    return data if isinstance(data, dict) else None
+        start = text.find("{", start + 1)
+    return None
 
-    async def stream_chat(self, messages: list[dict]) -> AsyncIterator[str]:
-        body = {
-            "model": self.model,
-            "messages": messages,
-            "stream": True,
-            "think": False,
-            "options": {"temperature": 0.7, "num_ctx": NUM_CTX},
-        }
-        try:
-            async with self._client() as c:
-                async with c.stream("POST", "/api/chat", json=body) as resp:
-                    if resp.status_code >= 400:
-                        await resp.aread()
-                        self._check_status(resp)
-                    async for line in resp.aiter_lines():
-                        if not line.strip():
-                            continue
-                        try:
-                            chunk = json.loads(line)
-                        except json.JSONDecodeError as e:
-                            raise LLMError(f"Ollama 응답을 해석하지 못했어요: {line[:80]}") from e
-                        if chunk.get("error"):
-                            raise LLMError(f"Ollama 오류: {chunk['error']}")
-                        text = chunk.get("message", {}).get("content", "")
-                        if text:
-                            yield text
-                        if chunk.get("done"):
-                            break
-        except httpx.ConnectError as e:
-            raise LLMUnavailable(str(e)) from e
-        except httpx.HTTPError as e:
-            raise LLMError(f"Ollama 통신 오류: {e!r}") from e
 
-    async def pull(self, on_progress) -> None:
-        """Download the model through Ollama, reporting (status, completed_bytes, total_bytes)."""
+class MlxLLM:
+    """Runs the model in this process on Apple Silicon (mlx-lm). Nothing to install besides the app.
+
+    The model is a Hugging Face repo (default Qwen3-8B 4-bit, ~4.6GB), downloaded by `pull()` on
+    first run and loaded lazily on the first call.
+    """
+
+    def __init__(self, model: str = DEFAULT_MLX_MODEL, json_max_tokens: int = 3072, chat_max_tokens: int = 512):
+        self.model = model
+        self.json_max_tokens = json_max_tokens
+        self.chat_max_tokens = chat_max_tokens
+        self._loaded = None
+        self._lock = threading.Lock()  # one generation at a time on the model
+
+    # ---- model files ----
+    def _local_path(self) -> str | None:
+        from huggingface_hub import snapshot_download
+
         try:
-            async with httpx.AsyncClient(
-                base_url=self.base_url, transport=self._transport, timeout=httpx.Timeout(None, connect=5)
-            ) as c:
-                async with c.stream("POST", "/api/pull", json={"model": self.model, "stream": True}) as resp:
-                    if resp.status_code >= 400:
-                        await resp.aread()
-                        raise LLMError(f"모델을 내려받지 못했어요: {_error_detail(resp)}")
-                    async for line in resp.aiter_lines():
-                        if not line.strip():
-                            continue
-                        chunk = json.loads(line)
-                        if chunk.get("error"):
-                            raise LLMError(f"모델을 내려받지 못했어요: {chunk['error']}")
-                        on_progress(chunk.get("status", ""), int(chunk.get("completed") or 0), int(chunk.get("total") or 0))
-        except httpx.ConnectError as e:
-            raise LLMUnavailable(str(e)) from e
-        except httpx.HTTPError as e:
-            raise LLMError(f"Ollama 통신 오류: {e!r}") from e
+            return snapshot_download(self.model, local_files_only=True)
+        except Exception:
+            return None
 
     async def check(self) -> dict:
-        try:
-            async with self._client() as c:
-                resp = await c.get("/api/tags")
-                resp.raise_for_status()
-        except httpx.HTTPError:
-            return {"ok": False, "model_present": False}
-        names = {m.get("name", "") for m in resp.json().get("models", [])}
-        present = self.model in names or f"{self.model}:latest" in names
+        present = await asyncio.to_thread(self._local_path) is not None
         return {"ok": True, "model_present": present}
+
+    async def pull(self, on_progress) -> None:
+        """Download the model, reporting (status, completed_bytes, total_bytes) by watching the cache."""
+        from huggingface_hub import HfApi, snapshot_download
+        from huggingface_hub.constants import HF_HUB_CACHE
+
+        try:
+            info = await asyncio.to_thread(lambda: HfApi().model_info(self.model, files_metadata=True))
+            total = sum((f.size or 0) for f in info.siblings or [])
+        except Exception as e:
+            raise LLMError(f"모델 정보를 가져오지 못했어요: {e}") from e
+        blobs = Path(HF_HUB_CACHE) / f"models--{self.model.replace('/', '--')}" / "blobs"
+
+        def done_bytes() -> int:
+            return sum(p.stat().st_size for p in blobs.glob("*") if p.is_file()) if blobs.exists() else 0
+
+        task = asyncio.create_task(asyncio.to_thread(snapshot_download, self.model))
+        while not task.done():
+            on_progress("downloading", min(done_bytes(), total), total)
+            await asyncio.sleep(0.5)
+        try:
+            task.result()
+        except Exception as e:
+            raise LLMError(f"모델을 내려받지 못했어요: {e}") from e
+        on_progress("success", total, total)
+
+    async def warmup(self) -> None:
+        """Load the weights ahead of the first question (no-op until the model is downloaded)."""
+        if self._loaded is None and await asyncio.to_thread(self._local_path) is not None:
+            await asyncio.to_thread(self._ensure)
+
+    # ---- generation ----
+    def _ensure(self):
+        if self._loaded is None:
+            path = self._local_path()
+            if path is None:
+                raise LLMUnavailable(f"모델이 아직 없어요: {self.model}")
+            from mlx_lm import load
+
+            try:
+                self._loaded = load(path)
+            except Exception as e:
+                raise LLMUnavailable(f"모델을 불러오지 못했어요: {e}") from e
+        return self._loaded
+
+    def _prompt(self, tokenizer, messages: list[dict]) -> str:
+        try:
+            return tokenizer.apply_chat_template(
+                messages, add_generation_prompt=True, tokenize=False, enable_thinking=False
+            )
+        except TypeError:  # template without the thinking switch
+            return tokenizer.apply_chat_template(messages, add_generation_prompt=True, tokenize=False)
+
+    def _run(self, messages: list[dict], temp: float, max_tokens: int, on_text=None, stop: threading.Event | None = None) -> str:
+        from mlx_lm import stream_generate
+        from mlx_lm.sample_utils import make_sampler
+
+        with self._lock:
+            model, tokenizer = self._ensure()
+            prompt = self._prompt(tokenizer, messages)
+            sampler = make_sampler(temp=temp, top_p=0.9 if temp > 0 else 0.0)
+            out = []
+            for r in stream_generate(model, tokenizer, prompt, max_tokens=max_tokens, sampler=sampler):
+                if r.text:
+                    out.append(r.text)
+                    if on_text:
+                        on_text(r.text)
+                if stop is not None and stop.is_set():
+                    break
+            return "".join(out)
+
+    async def chat_json(self, system: str, user: str) -> dict:
+        messages = [
+            {"role": "system", "content": system + "\n반드시 JSON 객체 하나만 출력합니다. 설명이나 코드 블록 표시는 쓰지 않습니다."},
+            {"role": "user", "content": user},
+        ]
+        last = ""
+        for _ in range(2):
+            try:
+                last = await asyncio.to_thread(self._run, messages, 0.3, self.json_max_tokens)
+            except LLMError:
+                raise
+            except Exception as e:
+                raise LLMError(f"LLM 실행 오류: {e!r}") from e
+            data = extract_json(last)
+            if data is not None:
+                return data
+        raise LLMError(f"LLM이 올바른 JSON을 돌려주지 않았어요: {last[:120]}")
+
+    async def stream_chat(self, messages: list[dict]) -> AsyncIterator[str]:
+        loop = asyncio.get_running_loop()
+        q: asyncio.Queue = asyncio.Queue()
+        stop = threading.Event()
+        end = object()
+
+        def worker() -> None:
+            try:
+                self._run(messages, 0.7, self.chat_max_tokens, lambda t: loop.call_soon_threadsafe(q.put_nowait, t), stop)
+                loop.call_soon_threadsafe(q.put_nowait, end)
+            except Exception as e:
+                loop.call_soon_threadsafe(q.put_nowait, e)
+
+        thread = threading.Thread(target=worker, daemon=True)
+        thread.start()
+        try:
+            while True:
+                item = await q.get()
+                if item is end:
+                    break
+                if isinstance(item, LLMError):
+                    raise item
+                if isinstance(item, Exception):
+                    raise LLMError(f"LLM 실행 오류: {item!r}") from item
+                yield item
+        finally:
+            stop.set()  # consumer left early (socket closed): stop generating
+            await asyncio.to_thread(thread.join)
 
 
 class GatedLLM:
     """Runs LLM calls one at a time behind a lock shared with STT.
 
-    Whisper (mlx) and Ollama both use the Metal GPU. Running them at the same time can starve
+    Whisper and the LLM both use the Metal GPU. Running them at the same time can starve
     WindowServer long enough for macOS to panic, so GPU work is serialized.
     """
 
@@ -181,3 +239,7 @@ class GatedLLM:
     async def pull(self, on_progress) -> None:
         # Network/disk only, no GPU: not gated.
         await self.inner.pull(on_progress)
+
+    async def warmup(self) -> None:
+        async with self.lock:
+            await self.inner.warmup()

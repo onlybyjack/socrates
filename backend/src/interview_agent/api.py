@@ -17,12 +17,12 @@ from .report import make_report
 from .sentences import SentenceSplitter
 from .store import Store
 from .terms import confirm_note, fix_terms
-from .stt import STT, vocabulary_hint
+from .stt import STT, vocabulary_hint, vocabulary_terms
 from .tts import TTSEngine
 
 log = logging.getLogger("interview_agent")
 
-OLLAMA_DOWN = "Ollama에 연결할 수 없거나 모델이 없어요. Ollama를 실행하고 모델을 받아주세요 (ollama pull qwen3:8b)."
+LLM_DOWN = "면접관 모델이 아직 준비되지 않았어요. 앱을 다시 열어 첫 실행 준비를 마쳐 주세요."
 
 
 class JobText(BaseModel):
@@ -59,7 +59,7 @@ def create_app(llm: LLM, stt: STT, tts: TTSEngine, store: Store) -> FastAPI:
                 store.update_session(sid, report=rep)
                 report_jobs.pop(sid, None)
             except LLMUnavailable:
-                report_jobs[sid] = {"status": "error", "message": OLLAMA_DOWN}
+                report_jobs[sid] = {"status": "error", "message": LLM_DOWN}
             except Exception as e:
                 log.exception("report failed")
                 report_jobs[sid] = {"status": "error", "message": f"피드백을 만들지 못했어요. 다시 시도해 주세요. ({e})"}
@@ -116,7 +116,7 @@ def create_app(llm: LLM, stt: STT, tts: TTSEngine, store: Store) -> FastAPI:
         chk = await llm.check() if hasattr(llm, "check") else {"ok": True, "model_present": True}
         _ensure_tts()
         return {
-            "ollama": chk["ok"],
+            "llm": chk["ok"],
             "model_present": chk["model_present"],
             "model": getattr(llm, "model", ""),
             "stt": True,
@@ -130,8 +130,6 @@ def create_app(llm: LLM, stt: STT, tts: TTSEngine, store: Store) -> FastAPI:
         if pull_state["status"] == "pulling":
             return dict(pull_state)
         chk = await llm.check()
-        if not chk["ok"]:
-            raise HTTPException(503, "Ollama가 실행 중이 아니에요.")
         if chk["model_present"]:
             pull_state.update(status="done")
             return dict(pull_state)
@@ -209,7 +207,7 @@ def create_app(llm: LLM, stt: STT, tts: TTSEngine, store: Store) -> FastAPI:
             analysis = await analyze(llm, s["source_text"], s["job_text"])
             plan = await make_plan(llm, analysis)
         except LLMUnavailable:
-            raise HTTPException(503, OLLAMA_DOWN)
+            raise HTTPException(503, LLM_DOWN)
         except LLMError as e:
             raise HTTPException(502, f"분석 결과를 만들지 못했어요. 다시 시도해 주세요. ({e})")
         except ValueError as e:
@@ -250,7 +248,8 @@ def create_app(llm: LLM, stt: STT, tts: TTSEngine, store: Store) -> FastAPI:
         orch = Orchestrator(llm, s["analysis"], s["plan"])
         voice = tts.voice_for(sid)  # random interviewer (male/female) per session
         confirmed_terms: set[str] = set()
-        hint = vocabulary_hint(s["analysis"])  # helps Whisper spell tech terms (Gemini, FastAPI...)
+        hint = vocabulary_hint(s["analysis"])
+        vocab = vocabulary_terms(s["analysis"])  # helps Whisper spell tech terms (Gemini, FastAPI...)
         send_lock = asyncio.Lock()
 
         async def send_json(obj: dict) -> None:
@@ -301,7 +300,7 @@ def create_app(llm: LLM, stt: STT, tts: TTSEngine, store: Store) -> FastAPI:
             note = preface = ""
             if text and spoken:
                 # STT writes tech names by sound ("센터리"); fix them before anyone reads the answer.
-                text, fixes = await fix_terms(llm, text)
+                text, fixes = await fix_terms(llm, text, vocab)
                 preface, note = confirm_note(fixes, confirmed_terms)
             if text:
                 await send_json({"type": "transcript", "role": "candidate", "text": text})
@@ -335,7 +334,7 @@ def create_app(llm: LLM, stt: STT, tts: TTSEngine, store: Store) -> FastAPI:
                     elif kind == "end_interview" and not orch.finished:
                         await run_turn(orch.end_early())
                 except LLMUnavailable:
-                    await send_json({"type": "error", "message": OLLAMA_DOWN})
+                    await send_json({"type": "error", "message": LLM_DOWN})
                 except LLMError as e:
                     await send_json({"type": "error", "message": f"면접관 응답을 만들지 못했어요: {e}"})
                 except WebSocketDisconnect:

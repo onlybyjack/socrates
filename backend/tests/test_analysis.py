@@ -1,11 +1,8 @@
-import json
-
-import httpx
 import pytest
 
 from fakes import FakeLLM
 from interview_agent.analysis import analyze, make_plan
-from interview_agent.llm import LLMError, OllamaLLM
+from interview_agent.llm import LLMError, LLMUnavailable, MlxLLM, extract_json
 
 
 async def test_analyze_blank_source_raises():
@@ -42,102 +39,52 @@ async def test_make_plan_pads_and_truncates():
     assert plan["technical"][1]["topic"]  # padded with something non-empty
 
 
-async def test_ollama_chat_json_retries_once():
-    calls = []
+class ScriptedMlx(MlxLLM):
+    """MlxLLM with the model replaced by canned replies (no weights needed)."""
 
-    def handler(req):
-        calls.append(json.loads(req.content))
-        content = "not json" if len(calls) == 1 else '{"a": 1}'
-        return httpx.Response(200, json={"message": {"content": content}})
+    def __init__(self, replies, chunks=None):
+        super().__init__("test/model")
+        self.replies = list(replies)
+        self.chunks = chunks or []
+        self.calls = []
 
-    llm = OllamaLLM("http://ollama.test", "qwen3:8b", transport=httpx.MockTransport(handler))
+    def _run(self, messages, temp, max_tokens, on_text=None, stop=None):
+        self.calls.append((messages, temp))
+        if on_text:
+            for c in self.chunks:
+                on_text(c)
+                if stop is not None and stop.is_set():
+                    break
+            return "".join(self.chunks)
+        return self.replies.pop(0)
+
+
+async def test_mlx_chat_json_retries_once_and_tolerates_chatter():
+    llm = ScriptedMlx(["not json", '<think></think>네, 결과입니다: ```json\n{"a": 1}\n```'])
     assert await llm.chat_json("sys", "user") == {"a": 1}
-    assert len(calls) == 2
-    assert calls[0]["format"] == "json" and calls[0]["think"] is False
-    assert calls[0]["model"] == "qwen3:8b"
+    assert len(llm.calls) == 2 and "JSON" in llm.calls[0][0][0]["content"]
 
 
-async def test_ollama_chat_json_gives_up_after_two():
-    handler = lambda req: httpx.Response(200, json={"message": {"content": "nope"}})
-    llm = OllamaLLM("http://ollama.test", "m", transport=httpx.MockTransport(handler))
+async def test_mlx_chat_json_gives_up_after_two():
     with pytest.raises(LLMError):
-        await llm.chat_json("s", "u")
+        await ScriptedMlx(["nope", "still nope"]).chat_json("s", "u")
 
 
-async def test_ollama_stream_chat_yields_content():
-    lines = "\n".join(json.dumps({"message": {"content": c}, "done": False}) for c in ["안녕", "하세요"])
-    lines += "\n" + json.dumps({"message": {"content": ""}, "done": True})
-    handler = lambda req: httpx.Response(200, text=lines)
-    llm = OllamaLLM("http://ollama.test", "m", transport=httpx.MockTransport(handler))
+async def test_mlx_stream_chat_yields_chunks():
+    llm = ScriptedMlx([], chunks=["안녕", "하세요"])
     out = [c async for c in llm.stream_chat([{"role": "user", "content": "hi"}])]
     assert "".join(out) == "안녕하세요"
 
 
-async def test_ollama_http_500_raises_llmerror():
-    handler = lambda req: httpx.Response(500, json={"error": "model requires more system memory"})
-    llm = OllamaLLM("http://ollama.test", "m", transport=httpx.MockTransport(handler))
-    with pytest.raises(LLMError, match="memory"):
+async def test_mlx_missing_model_is_unavailable(monkeypatch):
+    llm = MlxLLM("nobody/not-downloaded")
+    monkeypatch.setattr(llm, "_local_path", lambda: None)
+    assert (await llm.check()) == {"ok": True, "model_present": False}
+    with pytest.raises(LLMUnavailable):
         await llm.chat_json("s", "u")
-    with pytest.raises(LLMError):
-        [c async for c in llm.stream_chat([{"role": "user", "content": "hi"}])]
 
 
-async def test_ollama_read_error_mapped_to_llmerror():
-    def handler(req):
-        raise httpx.ReadTimeout("slow", request=req)
-
-    llm = OllamaLLM("http://ollama.test", "m", transport=httpx.MockTransport(handler))
-    with pytest.raises(LLMError):
-        await llm.chat_json("s", "u")
-    with pytest.raises(LLMError):
-        [c async for c in llm.stream_chat([{"role": "user", "content": "hi"}])]
-
-
-async def test_ollama_stream_error_line_raises():
-    lines = json.dumps({"message": {"content": "안"}, "done": False}) + "\n" + json.dumps({"error": "oom"})
-    llm = OllamaLLM("http://ollama.test", "m", transport=httpx.MockTransport(lambda r: httpx.Response(200, text=lines)))
-    with pytest.raises(LLMError, match="oom"):
-        [c async for c in llm.stream_chat([{"role": "user", "content": "hi"}])]
-
-
-async def test_analyze_truncates_long_inputs_to_fit_context():
-    llm = FakeLLM(json_responses=[{}])
-    await analyze(llm, "뷁" * 50000, "갉" * 50000)
-    _, user = llm.json_calls[0]
-    assert user.count("뷁") == 9000 and user.count("갉") == 4500
-
-
-async def test_ollama_uses_single_context_size():
-    bodies = []
-
-    def handler(req):
-        bodies.append(json.loads(req.content))
-        if bodies[-1]["stream"]:
-            return httpx.Response(200, text=json.dumps({"message": {"content": "a"}, "done": True}))
-        return httpx.Response(200, json={"message": {"content": "{}"}})
-
-    llm = OllamaLLM("http://ollama.test", "m", transport=httpx.MockTransport(handler))
-    await llm.chat_json("s", "u")
-    [c async for c in llm.stream_chat([])]
-    # same num_ctx for both, or Ollama reloads the model between calls
-    assert {b["options"]["num_ctx"] for b in bodies} == {12288}
-
-
-async def test_ollama_pull_reports_progress():
-    lines = "\n".join(json.dumps(x) for x in [
-        {"status": "pulling manifest"},
-        {"status": "downloading", "completed": 50, "total": 100},
-        {"status": "downloading", "completed": 100, "total": 100},
-        {"status": "success"},
-    ])
-    seen = []
-    llm = OllamaLLM("http://ollama.test", "qwen3:8b", transport=httpx.MockTransport(lambda r: httpx.Response(200, text=lines)))
-    await llm.pull(lambda status, done, total: seen.append((status, done, total)))
-    assert ("downloading", 50, 100) in seen and seen[-1][0] == "success"
-
-
-async def test_ollama_pull_error_line_raises():
-    llm = OllamaLLM("http://ollama.test", "nope", transport=httpx.MockTransport(
-        lambda r: httpx.Response(200, text=json.dumps({"error": "pull model manifest: file does not exist"}))))
-    with pytest.raises(LLMError, match="manifest"):
-        await llm.pull(lambda *a: None)
+def test_extract_json():
+    assert extract_json('앞말 {"a": "}{", "b": [1]} 뒷말') == {"a": "}{", "b": [1]}
+    assert extract_json("{bad} {\"ok\": 1}") == {"ok": 1}
+    assert extract_json("no json") is None

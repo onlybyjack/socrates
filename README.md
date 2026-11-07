@@ -37,8 +37,9 @@ macOS (Apple Silicon) · 한국어 · 오프라인 · 무료
 
 - Apple Silicon 맥 (M1 이상), 메모리 **16GB 이상** 권장
 - macOS 13 이상
-- [Ollama](https://ollama.com/download): 로컬 LLM 실행기. 설치만 해 두면 모델은 앱이 받습니다.
-- 디스크 여유 공간 약 8GB (모델: LLM 약 5GB, 받아쓰기 약 1.6GB, 목소리 약 400MB)
+- 디스크 여유 공간 약 8GB (모델: LLM 약 4.6GB, 받아쓰기 약 1.6GB, 목소리 약 400MB)
+
+다른 프로그램은 따로 설치할 필요가 없습니다. 앱 하나에 다 들어 있습니다.
 
 ### 내려받기
 
@@ -67,7 +68,7 @@ macOS (Apple Silicon) · 한국어 · 오프라인 · 무료
 - 이력서, 공고, 답변 음성, 대화 기록, 피드백은 모두 내 맥에만 저장됩니다.
   - 기록: `~/Library/Application Support/interview-agent/interview.db`
   - 지우고 싶으면 이 폴더를 지우면 됩니다.
-- 앱이 인터넷을 쓰는 경우는 세 가지뿐입니다: 내가 넣은 링크의 페이지를 가져올 때, 모델을 처음 내려받을 때, Ollama가 모델을 받을 때.
+- 앱이 인터넷을 쓰는 경우는 두 가지뿐입니다: 내가 넣은 링크의 페이지를 가져올 때, 모델을 처음 내려받을 때(Hugging Face).
 - 분석, 받아쓰기, 질문 생성, 목소리, 피드백은 모두 이 맥의 GPU·CPU에서 돌아갑니다.
 
 ## 작동 방식
@@ -81,15 +82,16 @@ macOS (Apple Silicon) · 한국어 · 오프라인 · 무료
 ┌──────────── 로컬 백엔드 (Python · FastAPI) ───────────────────┐
 │ 받아쓰기   mlx-whisper (내 자료의 기술 용어를 힌트로 사용)     │
 │ 용어 교정  소리 나는 대로 적힌 기술 이름을 원래 이름으로        │
+│ LLM        Qwen3-8B 4bit, MLX로 이 프로세스 안에서 실행          │
 │ 면접 진행  단계 상태 머신 + 꼬리 질문 (LLM 스트리밍)            │
 │ 목소리     Supertonic 3 (세션마다 남/여 면접관 무작위)          │
 │ 피드백     질문별 평가 (백그라운드)        저장  SQLite         │
-└──────────────┬────────────────────────────────────────────────┘
-               ▼
-        Ollama · qwen3:8b
+└───────────────────────────────────────────────────────────────┘
 ```
 
-답이 끝나면 받아쓰기 → 용어 교정 → LLM이 꼬리 질문을 할지 다음 주제로 갈지 정하며 말을 스트리밍 → 문장마다 바로 목소리로 바꿔 재생합니다. M 시리즈 맥에서 답이 끝난 뒤 첫 음성까지 보통 1~3초 걸립니다.
+LLM, 받아쓰기, 목소리 모두 백엔드 프로세스 안에서 Apple Silicon GPU로 돌아갑니다. 별도 서버나 실행기를 띄우지 않습니다.
+
+답이 끝나면 받아쓰기 → 용어 교정 → LLM이 꼬리 질문을 할지 다음 주제로 갈지 정하며 말을 스트리밍 → 문장마다 바로 목소리로 바꿔 재생합니다. M 시리즈 맥에서 답이 끝난 뒤 첫 음성까지 보통 2~4초 걸립니다.
 
 정해진 질문 목록을 읽는 게 아니라, 분석에서 뽑은 주제를 바탕으로 매번 내 답에 맞춰 다음 말을 새로 만듭니다.
 
@@ -102,7 +104,7 @@ macOS (Apple Silicon) · 한국어 · 오프라인 · 무료
 
 ## 소스에서 빌드하기
 
-필요한 것: Python 3.12+와 [uv](https://docs.astral.sh/uv/), Node 20+와 pnpm, Rust(rustup), Ollama
+필요한 것: Python 3.12+와 [uv](https://docs.astral.sh/uv/), Node 20+와 pnpm, Rust(rustup)
 
 ### 개발 모드
 
@@ -124,6 +126,7 @@ pnpm tauri dev
 - 앱 창에서 오른쪽 클릭 → 검사(Inspect)로 개발자 도구를 엽니다.
 - Homebrew로 rustup을 설치했다면 `export PATH="/opt/homebrew/opt/rustup/bin:$PATH"`가 필요할 수 있습니다.
 - 8765 포트가 이미 쓰이고 있다면: `lsof -ti:8765 | xargs kill`
+- 모델은 처음 켤 때 앱의 첫 실행 화면이 받습니다. 백엔드만 켜서 쓸 때는 `uv run python -c "from huggingface_hub import snapshot_download; snapshot_download('mlx-community/Qwen3-8B-4bit')"`로 미리 받아 두세요.
 
 터미널에서 텍스트로만 면접해 볼 수도 있습니다.
 
@@ -152,8 +155,7 @@ cd app && pnpm build
 
 | 변수 | 기본값 | |
 |---|---|---|
-| `IA_LLM_MODEL` | `qwen3:8b` | Ollama 모델 이름 |
-| `IA_OLLAMA_URL` | `http://localhost:11434` | |
+| `IA_LLM_MODEL` | `mlx-community/Qwen3-8B-4bit` | Hugging Face의 MLX 모델 |
 | `IA_STT_MODEL` | `mlx-community/whisper-large-v3-turbo` | |
 | `IA_TTS_VOICES` | `M3,F2` | 세션마다 이 중에서 무작위 |
 | `IA_DATA_DIR` | `~/Library/Application Support/interview-agent` | |
@@ -181,7 +183,7 @@ PR 전에 `cd backend && uv run pytest`와 `cd app && pnpm build`가 통과하�
 
 - [ ] 면접 길이 선택 (짧게 · 보통 · 길게)
 - [ ] 피드백 생성 중에도 면접 질문을 먼저 처리
-- [ ] 더 큰 모델 선택 (qwen3:14b 등)
+- [ ] 더 큰 모델 선택 (Qwen3-14B 등)
 - [ ] 마이크 확인에서 받아쓰기 미리보기, 면접관 목소리 들어보기
 - [ ] Apple 공증
 
@@ -189,7 +191,7 @@ PR 전에 `cd backend && uv run pytest`와 `cd app && pnpm build`가 통과하�
 
 Socrates는 이 오픈소스 프로젝트들 위에 만들어졌습니다.
 
-- [Qwen3](https://github.com/QwenLM/Qwen3) (Apache 2.0) · [Ollama](https://github.com/ollama/ollama)
+- [Qwen3](https://github.com/QwenLM/Qwen3) (Apache 2.0) · [MLX](https://github.com/ml-explore/mlx) · [mlx-lm](https://github.com/ml-explore/mlx-lm) (MIT)
 - [Whisper](https://github.com/openai/whisper) (MIT) · [mlx-whisper](https://github.com/ml-explore/mlx-examples)
 - [Supertonic](https://huggingface.co/Supertone/supertonic-3) (코드 MIT, 모델 OpenRAIL-M)
 - [Silero VAD](https://github.com/snakers4/silero-vad) (MIT) · [vad-web](https://github.com/ricky0123/vad)

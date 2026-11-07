@@ -99,7 +99,8 @@ REPORT_SYSTEM = """당신은 20년 경력의 시니어 면접관입니다. 방�
 # English on purpose: qwen3:8b infers phonetic tech names far better from an English instruction.
 TERM_FIX_SYSTEM = """You fix speech-to-text errors in a Korean developer's interview answer. Output JSON only.
 Korean STT often writes tech/product/company names phonetically in Hangul, sometimes slightly wrong. For each such word, say it aloud and think which real tool/library/service a developer would mean (e.g. 센터리 sounds like "Sentry", an error monitoring tool; 셀러리 sounds like "Celery", a Python task queue).
-Only list words you are confident about. Do not touch ordinary Korean words.
+If a list of likely terms is given, prefer a term from it when the sound matches (제미나 → Gemini); otherwise use your own knowledge.
+"meant" must be the real official spelling (Gemini, not Jemini). Only list words you are confident about. Do not touch ordinary Korean words.
 "odd" is true when the Hangul is NOT the usual way Koreans write that name (센터리 for Sentry, 패스트잎 for FastAPI), false when it is the normal spelling (파이썬, 슬랙, 레디스, 쿠버네티스).
 Output: {"fixes": [{"heard": "<exactly as written>", "meant": "<official name>", "odd": true|false}]}"""
 

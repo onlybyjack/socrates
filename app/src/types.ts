@@ -9,7 +9,7 @@ export const STAGES: { key: Stage; label: string }[] = [
 ];
 
 export interface Health {
-  ollama: boolean;
+  llm: boolean;
   model_present: boolean;
   model: string;
   stt: boolean;

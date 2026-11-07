@@ -1,5 +1,4 @@
 import { useEffect, useRef, useState } from "react";
-import { openUrl } from "@tauri-apps/plugin-opener";
 import { api, BASE } from "../api";
 import { Icon } from "../ui";
 import type { Health } from "../types";
@@ -19,14 +18,6 @@ interface Status {
 
 const POLL_MS = 1000;
 const ENGINE_GIVE_UP = 40; // ~40s of failed polls
-
-async function open(url: string) {
-  try {
-    await openUrl(url);
-  } catch {
-    window.open(url, "_blank");
-  }
-}
 
 const gb = (bytes: number) => (bytes / 1024 ** 3).toFixed(1);
 
@@ -50,7 +41,7 @@ export function SplashScreen({ onReady }: Props) {
         if (stop) return;
         setHealth(h);
         setEngineDown(0);
-        if (h.ollama && !h.model_present && h.pull.status === "idle" && !pullRequested.current) requestPull();
+        if (h.llm && !h.model_present && h.pull.status === "idle" && !pullRequested.current) requestPull();
       } catch {
         if (!stop) setEngineDown((n) => n + 1);
       }
@@ -67,7 +58,7 @@ export function SplashScreen({ onReady }: Props) {
   const pullPct = h && h.pull.total ? h.pull.completed / h.pull.total : 0;
 
   // Rough weights: the first-run download dominates the wait.
-  const parts = [!!h, !!h?.ollama, !!h?.model_present, !!h?.tts, !!h?.stt_ready];
+  const parts = [!!h, !!h?.model_present, !!h?.tts, !!h?.stt_ready];
   const done = parts.filter(Boolean).length;
   const allDone = done === parts.length;
   const progress = Math.min(1, (done + (pulling ? pullPct * 0.95 : 0)) / parts.length);
@@ -78,13 +69,6 @@ export function SplashScreen({ onReady }: Props) {
       engineDown > ENGINE_GIVE_UP
         ? { title: "앱이 제대로 켜지지 않았어요", note: "앱을 완전히 종료했다가 다시 열어 주세요.", blocked: true }
         : { title: "면접실을 여는 중이에요" };
-  } else if (!h.ollama) {
-    status = {
-      title: "면접관을 움직일 무료 프로그램이 필요해요",
-      note: "아래 버튼으로 내려받아 설치하고 실행하면, 이 화면이 알아서 이어서 준비해요.",
-      action: { label: "설치 프로그램 받기", run: () => open("https://ollama.com/download") },
-      blocked: true,
-    };
   } else if (!h.model_present) {
     status =
       h.pull.status === "error"

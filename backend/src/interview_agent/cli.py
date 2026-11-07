@@ -16,7 +16,7 @@ from .analysis import analyze, make_plan
 from .config import get_settings
 from .ingest import combine_sources, extract_text, fetch_job_posting
 from .interview import Orchestrator
-from .llm import OllamaLLM
+from .llm import MlxLLM
 from .report import make_report
 
 
@@ -41,7 +41,7 @@ async def main() -> None:
     args = ap.parse_args()
 
     s = get_settings()
-    llm = OllamaLLM(s.ollama_url, s.llm_model)
+    llm = MlxLLM(s.llm_model)
     source = combine_sources([(Path(p).name, extract_text(p, Path(p).read_bytes())) for p in args.resume])
     if args.job_file:
         job = Path(args.job_file).read_text()

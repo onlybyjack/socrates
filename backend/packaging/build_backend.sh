@@ -12,6 +12,10 @@ uv run pyinstaller packaging/entry.py \
   --collect-all justext \
   --collect-all supertonic \
   --collect-all onnxruntime \
+  --collect-all mlx_lm \
+  --collect-all transformers \
+  --collect-all tokenizers \
+  --collect-all jinja2 \
   --collect-data courlan \
   --collect-data htmldate \
   --collect-submodules uvicorn \

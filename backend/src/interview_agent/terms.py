@@ -11,12 +11,16 @@ _HANGUL = re.compile(r"[가-힣]")
 _LATIN = re.compile(r"[A-Za-z]")
 
 
-async def fix_terms(llm: LLM, text: str) -> tuple[str, list[dict]]:
-    """Returns (corrected text, fixes). Never raises: on any failure the answer passes through unchanged."""
+async def fix_terms(llm: LLM, text: str, vocabulary: list[str] | None = None) -> tuple[str, list[dict]]:
+    """Returns (corrected text, fixes). `vocabulary`: likely terms (from the resume/job) to match against.
+    Never raises: on any failure the answer passes through unchanged."""
     if not _HANGUL.search(text):
         return text, []
+    user = text
+    if vocabulary:
+        user = f"Terms this candidate is likely to mention: {', '.join(vocabulary[:60])}\n\nAnswer:\n{text}"
     try:
-        raw = await llm.chat_json(prompts.TERM_FIX_SYSTEM, text)
+        raw = await llm.chat_json(prompts.TERM_FIX_SYSTEM, user)
     except Exception as e:
         log.warning("term fix failed: %s", e)
         return text, []

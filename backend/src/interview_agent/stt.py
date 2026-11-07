@@ -67,8 +67,8 @@ _BASE_TERMS = [
 _MAX_HINT_CHARS = 300  # Whisper's prompt window is ~224 tokens; keep it well under
 
 
-def vocabulary_hint(analysis: dict | None) -> str:
-    """Whisper `initial_prompt`: the candidate's and the job's own tech terms, so they are written correctly."""
+def vocabulary_terms(analysis: dict | None) -> list[str]:
+    """Tech terms from the candidate's materials and the job posting first, then common ones."""
     analysis = analysis or {}
     job = analysis.get("job") or {}
     cand = analysis.get("candidate") or {}
@@ -81,6 +81,12 @@ def vocabulary_hint(analysis: dict | None) -> str:
         if t.lower() not in seen:
             seen.add(t.lower())
             terms.append(t)
+    return terms
+
+
+def vocabulary_hint(analysis: dict | None) -> str:
+    """Whisper `initial_prompt`: the candidate's and the job's own tech terms, so they are written correctly."""
+    terms = vocabulary_terms(analysis)
     head = "개발자 기술 면접 답변입니다. 용어: "
     out = head
     for t in terms:

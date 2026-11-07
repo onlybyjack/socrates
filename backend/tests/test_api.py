@@ -33,7 +33,7 @@ def ready_session(store) -> str:
 def test_health_reports_components(tmp_path):
     c, _ = make_client(tmp_path, llm=DownLLM())
     body = c.get("/api/health").json()
-    assert body["ollama"] is False and body["model_present"] is False
+    assert body["llm"] is False and body["model_present"] is False
     assert body["tts"] is True and body["stt"] is True
 
 
@@ -125,7 +125,7 @@ def test_analyze_503_when_llm_down(tmp_path):
     sid = store.create_session("이력서", None, "공고")
     r = c.post(f"/api/sessions/{sid}/analyze")
     assert r.status_code == 503
-    assert "Ollama" in r.json()["detail"]
+    assert "면접관 모델" in r.json()["detail"]
 
 
 def test_unknown_session_404(tmp_path):
