@@ -17,12 +17,23 @@ export class Recorder {
   private gapTimer: number | undefined;
   private active = false;
   private lastLevel = 0;
+  private stream: MediaStream | null = null;
+  private deviceId?: string;
 
   onAnswer: (wav: ArrayBuffer | null) => void = () => {};
   onState: (s: MicState) => void = () => {};
 
-  async init() {
+  /** `deviceId` picks a specific microphone (chosen on the mic check screen); default device otherwise. */
+  async init(deviceId?: string) {
+    this.deviceId = deviceId;
+    // Open the mic once, up front, and keep it for the whole interview. MicVAD's default stops the
+    // tracks on every pause and reopens the *default* device on resume, so a phone/Continuity mic
+    // reconnected each turn (and the chosen mic was lost).
+    await this.openStream();
     this.vad = await MicVAD.new({
+      getStream: () => this.openStream(),
+      pauseStream: async () => {},
+      resumeStream: () => this.openStream(),
       model: "v5",
       baseAssetPath: "/vad/",
       onnxWASMBasePath: "/vad/",
@@ -51,6 +62,15 @@ export class Recorder {
         if (this.active) this.onState("waiting");
       },
     });
+  }
+
+  private async openStream(): Promise<MediaStream> {
+    if (this.stream?.getAudioTracks().some((t) => t.readyState === "live")) return this.stream;
+    const base = { channelCount: 1, echoCancellation: true, autoGainControl: true, noiseSuppression: true };
+    this.stream = await navigator.mediaDevices.getUserMedia({
+      audio: this.deviceId ? { ...base, deviceId: { exact: this.deviceId } } : base,
+    });
+    return this.stream;
   }
 
   level(): number {
@@ -95,13 +115,21 @@ export class Recorder {
     this.segments = [];
     this.lastLevel = 0;
     this.onState("off");
-    this.vad?.pause();
+    this.vad?.pause().catch(() => {});
     this.onAnswer(parts.length ? encodeWav(concatFloat32(parts), SAMPLE_RATE) : null);
   }
 
   destroy() {
     this.active = false;
     window.clearTimeout(this.gapTimer);
-    this.vad?.destroy();
+    // MicVAD throws if its stream was never started (e.g. leaving before answering); nothing to release then.
+    try {
+      Promise.resolve(this.vad?.destroy()).catch(() => {});
+    } catch {
+      /* not started */
+    }
+    this.vad = null;
+    this.stream?.getTracks().forEach((t) => t.stop());
+    this.stream = null;
   }
 }

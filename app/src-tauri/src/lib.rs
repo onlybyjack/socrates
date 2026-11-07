@@ -32,11 +32,32 @@ fn spawn_backend(app: &tauri::App) -> Option<Child> {
         .ok()
 }
 
+/// Give the window an empty unified toolbar, like Safari/Chrome: macOS then draws the
+/// full-size window controls and the taller title area instead of the small plain ones.
+#[cfg(target_os = "macos")]
+fn unify_titlebar(window: &tauri::WebviewWindow) {
+    use objc2::MainThreadMarker;
+    use objc2_app_kit::{NSTitlebarSeparatorStyle, NSToolbar, NSWindow, NSWindowToolbarStyle};
+    let (Ok(ptr), Some(mtm)) = (window.ns_window(), MainThreadMarker::new()) else {
+        return;
+    };
+    // SAFETY: Tauri hands back the live NSWindow pointer; setup runs on the main thread.
+    let ns = unsafe { &*(ptr as *const NSWindow) };
+    let toolbar = NSToolbar::new(mtm);
+    ns.setToolbar(Some(&toolbar));
+    ns.setToolbarStyle(NSWindowToolbarStyle::UnifiedCompact);
+    ns.setTitlebarSeparatorStyle(NSTitlebarSeparatorStyle::None);
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .setup(|app| {
+            #[cfg(target_os = "macos")]
+            if let Some(w) = app.get_webview_window("main") {
+                unify_titlebar(&w);
+            }
             let child = spawn_backend(app);
             app.manage(Backend(Mutex::new(child)));
             Ok(())

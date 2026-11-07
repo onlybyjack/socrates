@@ -7,6 +7,8 @@ export class AudioQueue {
   private endAt = 0;
   private pending = 0;
   private idleCb: (() => void) | null = null;
+  // WebKit can garbage-collect a playing source node and never fire `onended`; keep them alive.
+  private live = new Set<AudioBufferSourceNode>();
 
   constructor() {
     this.analyser = this.ctx.createAnalyser();
@@ -23,21 +25,40 @@ export class AudioQueue {
     this.idleCb = cb;
   }
 
-  /** Clips are decoded asynchronously but always scheduled in the order they were enqueued. */
-  enqueue(buf: ArrayBuffer) {
+  /**
+   * Clips are decoded asynchronously but always scheduled in the order they were enqueued.
+   * `onStart(seconds)` fires when this clip actually starts playing (0 if it could not be decoded).
+   */
+  enqueue(buf: ArrayBuffer, onStart?: (seconds: number) => void) {
     this.pending++;
     const decoded = this.ctx.decodeAudioData(buf.slice(0)).catch(() => null);
     this.chain = this.chain.then(async () => {
       const audio = await decoded;
-      if (!audio) return this.finishOne();
-      if (this.ctx.state === "suspended") await this.ctx.resume();
+      if (!audio) {
+        onStart?.(0);
+        return this.finishOne();
+      }
+      // resume() can stay pending without a user gesture in WebKit; don't let it block the queue.
+      if (this.ctx.state === "suspended") await Promise.race([this.ctx.resume(), new Promise((r) => setTimeout(r, 800))]);
       const src = this.ctx.createBufferSource();
       src.buffer = audio;
       src.connect(this.analyser);
       const start = Math.max(this.ctx.currentTime + 0.02, this.endAt);
+      const startsIn = Math.max(0, (start - this.ctx.currentTime) * 1000);
+      this.live.add(src);
+      let done = false;
+      const end = () => {
+        if (done) return;
+        done = true;
+        this.live.delete(src);
+        this.finishOne();
+      };
+      src.onended = end;
+      // Fallback in case `onended` never arrives (seen in WKWebView): end shortly after the clip's length.
+      window.setTimeout(end, startsIn + audio.duration * 1000 + 400);
       src.start(start);
       this.endAt = start + audio.duration;
-      src.onended = () => this.finishOne();
+      if (onStart) window.setTimeout(() => onStart(audio.duration), startsIn);
     });
   }
 

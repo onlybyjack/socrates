@@ -1,11 +1,106 @@
+# ───────── 비공개: 내부 문서 · 에이전트 작업 파일 ─────────
+docs/
+.superpowers/
+.claude/
+CLAUDE.local.md
+*.local.md
+.cursor/
+.aider*
+.codex/
+
+# ───────── 비밀 · 환경 변수 · 인증서 ─────────
+.env
+.env.*
+!.env.example
+*.env
+.envrc
+*.pem
+*.key
+*.p8
+*.p12
+*.cer
+*.mobileprovision
+*.provisionprofile
+secrets/
+credentials*.json
+service-account*.json
+# Tauri 업데이터 서명 키
+.tauri/
+
+# ───────── 개인 데이터 (이력서·면접 기록·녹음이 실수로 들어가지 않게) ─────────
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
+*.wav
+*.mp3
+*.m4a
+*.webm
+recordings/
+/data/
+*.pdf
+# 테스트용 가상 인물 자료는 예외
+!backend/scripts/fixtures/**
+
+# ───────── 모델 파일 (크고, 각자 내려받음) ─────────
+*.onnx
+*.gguf
+*.safetensors
+models/
+
+# ───────── Python ─────────
 .venv/
+venv/
 __pycache__/
-*.pyc
+*.py[cod]
 .pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+*.egg-info/
+backend/build/
+backend/dist/
+# PyInstaller가 빌드 때 새로 만듦 (packaging/build_backend.sh가 기준)
+*.spec
+
+# ───────── Node · 프론트엔드 ─────────
 node_modules/
 dist/
+dist-ssr/
+*.tsbuildinfo
+.vite/
+.eslintcache
+# 빌드 때 node_modules에서 복사해 오는 VAD 자산
+app/public/vad/
+
+# ───────── Rust · Tauri ─────────
 app/src-tauri/target/
 app/src-tauri/gen/
+
+# ───────── 로그 · 임시 파일 ─────────
+logs/
+*.log
+npm-debug.log*
+pnpm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+tmp/
+*.tmp
+*.bak
+*.orig
+*.swp
+*~
+
+# ───────── OS · 에디터 ─────────
 .DS_Store
-.superpowers/
-app/public/vad/
+.AppleDouble
+.LSOverride
+._*
+Thumbs.db
+.idea/
+.vscode/*
+!.vscode/extensions.json
+*.code-workspace

@@ -83,30 +83,22 @@ async def test_full_run_reaches_finished():
     for _ in range(20):
         if o.finished:
             break
-        await collect(o.respond("궁금한 거 없습니다" if o.stage == "reverse_qa" else "답변입니다"))
+        await collect(o.respond("답변입니다"))
         stages.append(o.stage)
     assert o.finished and o.stage == "closing"
-    order = ["intro", "motivation", "experience", "technical", "reverse_qa", "closing"]
+    order = ["intro", "motivation", "experience", "technical", "closing"]
     seen = [s for i, s in enumerate(stages) if i == 0 or stages[i - 1] != s]
     assert seen == order
     assert stages.count("experience") == 3 and stages.count("technical") == 2
 
 
-async def test_reverse_qa_question_then_none_goes_closing():
-    o = make(FakeLLM())
-    o.stage, o.main_index = "reverse_qa", 1
-    await collect(o.respond("팀 규모가 어떻게 되나요?"))
-    assert o.stage == "reverse_qa" and not o.finished
-    await collect(o.respond("아니요, 없어요."))
+async def test_last_technical_answer_closes_without_reverse_qa():
+    o = make(FakeLLM(stream_responses=["[NEXT]\n준비한 질문은 여기까지입니다. 감사합니다."]))
+    o.stage, o.main_index, o.follow_ups = "technical", 2, 0
+    text = await collect(o.respond("답변입니다"))
     assert o.finished and o.stage == "closing"
-
-
-async def test_reverse_qa_max_then_finish():
-    o = make(FakeLLM(), max_reverse=2)
-    o.stage, o.main_index = "reverse_qa", 1
-    await collect(o.respond("질문1?"))
-    await collect(o.respond("질문2?"))
-    assert o.finished
+    assert "감사합니다" in text
+    assert "궁금한 점" not in o.llm.stream_calls[-1][-1]["content"]
 
 
 async def test_end_early():

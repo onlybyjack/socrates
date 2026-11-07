@@ -7,10 +7,9 @@ from collections.abc import AsyncIterator
 from . import prompts
 from .llm import LLM, LLMError
 
-STAGES = ["intro", "motivation", "experience", "technical", "reverse_qa", "closing"]
+STAGES = ["intro", "motivation", "experience", "technical", "closing"]
 _MAIN_COUNTS = {"intro": 1, "motivation": 1, "experience": 3, "technical": 2}
 _TAG_RE = re.compile(r"^\s*\[(FOLLOW_UP|NEXT)\]\s*")
-_NEGATIVE_RE = re.compile(r"(없(습니다|어요|어|네요|는)|괜찮(습니다|아요)|^\s*아니(요|오)?)")
 
 
 class TagStripper:
@@ -52,16 +51,14 @@ class TagStripper:
 
 
 class Orchestrator:
-    def __init__(self, llm: LLM, analysis: dict, plan: dict, max_follow_ups: int = 2, max_reverse: int = 3):
+    def __init__(self, llm: LLM, analysis: dict, plan: dict, max_follow_ups: int = 2):
         self.llm = llm
         self.analysis = analysis
         self.plan = plan
         self.max_follow_ups = max_follow_ups
-        self.max_reverse = max_reverse
         self.stage = "intro"
         self.main_index = 0  # number of main questions asked in the current stage
         self.follow_ups = 0
-        self.reverse_count = 0
         self.finished = False
         self.last_kind = "other"
         self.history: list[dict] = []
@@ -81,7 +78,9 @@ class Orchestrator:
         async for chunk in self._speak(prompts.OPENING_INSTRUCTION.format(company=self._company, role=self._role)):
             yield chunk
 
-    async def respond(self, answer: str) -> AsyncIterator[str]:
+    async def respond(self, answer: str, note: str = "", preface: str = "") -> AsyncIterator[str]:
+        """`note`: extra memo for this turn only. `preface`: words said before the model's reply
+        (e.g. "Sentry 말씀하신 거군요.")."""
         if self.finished:
             return
         if not answer.strip():
@@ -89,10 +88,6 @@ class Orchestrator:
             yield prompts.REPEAT_PROMPT
             return
         self.history.append({"role": "user", "content": answer.strip()})
-        if self.stage == "reverse_qa":
-            async for chunk in self._reverse(answer):
-                yield chunk
-            return
 
         can_follow = self.follow_ups < self.max_follow_ups
         next_stage, next_index = self._next_target()
@@ -107,8 +102,10 @@ class Orchestrator:
         else:
             instruction = prompts.FORCE_NEXT_INSTRUCTION.format(next_desc=next_desc)
 
+        if note:
+            instruction = f"{instruction}\n\n{note}"
         stripper = TagStripper()
-        async for chunk in self._speak(instruction, stripper):
+        async for chunk in self._speak(instruction, stripper, preface):
             yield chunk
 
         if can_follow and stripper.tag == "FOLLOW_UP":
@@ -116,7 +113,11 @@ class Orchestrator:
             self.last_kind = "follow_up"
         else:
             self.stage, self.main_index, self.follow_ups = next_stage, next_index, 0
-            self.last_kind = "other" if next_stage == "reverse_qa" else "main"
+            # No reverse Q&A: the model cannot state real facts about the company, so after the
+            # last technical question the interviewer just thanks the candidate and ends.
+            self.last_kind = "other" if next_stage == "closing" else "main"
+            if next_stage == "closing":
+                self.finished = True
 
     async def end_early(self) -> AsyncIterator[str]:
         self.stage = "closing"
@@ -126,27 +127,6 @@ class Orchestrator:
         self.finished = True
 
     # ---- internals --------------------------------------------------
-    async def _reverse(self, answer: str) -> AsyncIterator[str]:
-        self.last_kind = "other"
-        if _NEGATIVE_RE.search(answer) and "?" not in answer:
-            self.stage = "closing"
-            async for chunk in self._speak(prompts.CLOSING_INSTRUCTION):
-                yield chunk
-            self.finished = True
-            return
-        self.reverse_count += 1
-        last = self.reverse_count >= self.max_reverse
-        tail = (
-            "답한 뒤, 오늘 면접은 여기까지라며 감사 인사로 마무리합니다. 질문은 하지 않습니다."
-            if last
-            else "답한 뒤, 다른 궁금한 점이 있는지 짧게 묻습니다."
-        )
-        async for chunk in self._speak(prompts.REVERSE_INSTRUCTION.format(tail=tail)):
-            yield chunk
-        if last:
-            self.stage = "closing"
-            self.finished = True
-
     def _next_target(self) -> tuple[str, int]:
         if self.main_index < _MAIN_COUNTS.get(self.stage, 0):
             return self.stage, self.main_index + 1
@@ -179,9 +159,12 @@ class Orchestrator:
             msgs.append({"role": "user", "content": instruction})
         return msgs
 
-    async def _speak(self, instruction: str, stripper: TagStripper | None = None) -> AsyncIterator[str]:
+    async def _speak(self, instruction: str, stripper: TagStripper | None = None, preface: str = "") -> AsyncIterator[str]:
         stripper = stripper or TagStripper()
         said = []
+        if preface:
+            said.append(preface)
+            yield preface
         async for delta in self.llm.stream_chat(self._messages(instruction)):
             out = stripper.feed(delta)
             if out:

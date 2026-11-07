@@ -36,6 +36,14 @@ def _strs(v) -> list[str]:
     return [x for x in v if isinstance(x, str)] if isinstance(v, list) else []
 
 
+def is_substantive(answer: str) -> bool:
+    """Too short to praise: "네?", "??", "모르겠어요"... The model must not invent a strength for these."""
+    core = "".join(ch for ch in answer if ch.isalnum())
+    if any(w in core for w in ("모르겠", "모릅니다", "기억이안", "기억안")):
+        return False
+    return len(core) >= 6
+
+
 async def make_report(llm: LLM, analysis: dict, turns: list[dict]) -> dict:
     pairs = pair_questions(turns)
     if not pairs:
@@ -57,7 +65,7 @@ async def make_report(llm: LLM, analysis: dict, turns: list[dict]) -> dict:
             {
                 "question": p["question"],
                 "answer": p["answer"],
-                "good": _str(fb.get("good")),
+                "good": _str(fb.get("good")) if is_substantive(p["answer"]) else "",
                 "improve": _str(fb.get("improve")),
                 "better_direction": _str(fb.get("better_direction")),
             }

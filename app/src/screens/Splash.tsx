@@ -1,23 +1,24 @@
 import { useEffect, useRef, useState } from "react";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { api, BASE } from "../api";
+import { Icon } from "../ui";
 import type { Health } from "../types";
 
 interface Props {
   onReady: () => void;
 }
 
-type StepState = "wait" | "active" | "done" | "blocked";
-
-interface Step {
-  key: string;
-  label: string;
-  state: StepState;
-  detail?: string;
+/** What the user sees: one plain status line, never the internal component list. */
+interface Status {
+  title: string;
+  note?: string;
+  /** Set only when the user has to do something themselves. */
   action?: { label: string; run: () => void };
+  blocked?: boolean;
 }
 
 const POLL_MS = 1000;
+const ENGINE_GIVE_UP = 40; // ~40s of failed polls
 
 async function open(url: string) {
   try {
@@ -27,16 +28,19 @@ async function open(url: string) {
   }
 }
 
-function gb(bytes: number) {
-  return (bytes / 1024 ** 3).toFixed(1);
-}
+const gb = (bytes: number) => (bytes / 1024 ** 3).toFixed(1);
 
-/** Startup splash: brings the local engine up step by step, fixing what it can by itself. */
+/** Startup splash: brings everything up on its own and only asks the user for help when it must. */
 export function SplashScreen({ onReady }: Props) {
   const [health, setHealth] = useState<Health | null>(null);
-  const [engineDown, setEngineDown] = useState(0); // consecutive failed polls
+  const [engineDown, setEngineDown] = useState(0);
   const pullRequested = useRef(false);
   const readySent = useRef(false);
+
+  const requestPull = () => {
+    pullRequested.current = true;
+    api.pullModel().catch(() => (pullRequested.current = false));
+  };
 
   useEffect(() => {
     let stop = false;
@@ -46,10 +50,7 @@ export function SplashScreen({ onReady }: Props) {
         if (stop) return;
         setHealth(h);
         setEngineDown(0);
-        if (h.ollama && !h.model_present && h.pull.status === "idle" && !pullRequested.current) {
-          pullRequested.current = true;
-          api.pullModel().catch(() => (pullRequested.current = false));
-        }
+        if (h.ollama && !h.model_present && h.pull.status === "idle" && !pullRequested.current) requestPull();
       } catch {
         if (!stop) setEngineDown((n) => n + 1);
       }
@@ -65,65 +66,47 @@ export function SplashScreen({ onReady }: Props) {
   const pulling = h?.pull.status === "pulling";
   const pullPct = h && h.pull.total ? h.pull.completed / h.pull.total : 0;
 
-  const steps: Step[] = [
-    {
-      key: "engine",
-      label: "면접 엔진 켜기",
-      state: h ? "done" : engineDown > 40 ? "blocked" : "active",
-      detail: !h && engineDown > 40 ? "엔진이 켜지지 않아요. 앱을 종료했다가 다시 열어 주세요." : undefined,
-    },
-    {
-      key: "ollama",
-      label: "Ollama 연결",
-      state: !h ? "wait" : h.ollama ? "done" : "blocked",
-      detail: h && !h.ollama ? "질문을 만드는 Ollama가 필요해요. 설치하고 실행하면 자동으로 이어져요." : undefined,
-      action: h && !h.ollama ? { label: "Ollama 내려받기", run: () => open("https://ollama.com/download") } : undefined,
-    },
-    {
-      key: "model",
-      label: `질문 모델 준비 (${h?.model || "qwen3:8b"})`,
-      state: !h || !h.ollama ? "wait" : h.model_present ? "done" : h.pull.status === "error" ? "blocked" : "active",
-      detail:
-        h && !h.model_present && h.ollama
-          ? h.pull.status === "error"
-            ? `내려받지 못했어요: ${h.pull.message}`
-            : h.pull.total
-              ? `내려받는 중 ${gb(h.pull.completed)} / ${gb(h.pull.total)}GB · 처음 한 번만 받아요`
-              : "내려받을 준비 중…"
-          : undefined,
-      action:
-        h?.pull.status === "error"
-          ? {
-              label: "다시 받기",
-              run: () => {
-                pullRequested.current = true;
-                api.pullModel().catch(() => (pullRequested.current = false));
-              },
-            }
-          : undefined,
-    },
-    {
-      key: "voice",
-      label: "면접관 목소리",
-      state: !h ? "wait" : h.tts ? "done" : "blocked",
-      detail: h && !h.tts ? "시스템 설정 → 손쉬운 사용 → 읽기 및 말하기 → 시스템 음성에서 한국어 ‘유나’를 내려받아 주세요." : undefined,
-      action:
-        h && !h.tts
-          ? { label: "설정 열기", run: () => open("x-apple.systempreferences:com.apple.preference.universalaccess?SpokenContent") }
-          : undefined,
-    },
-    {
-      key: "stt",
-      label: "음성 인식 준비",
-      state: !h ? "wait" : h.stt_ready ? "done" : "active",
-      detail: h && !h.stt_ready ? "처음 실행할 때는 음성 인식 모델(약 1.6GB)을 내려받아서 몇 분 걸릴 수 있어요." : undefined,
-    },
-  ];
+  // Rough weights: the first-run download dominates the wait.
+  const parts = [!!h, !!h?.ollama, !!h?.model_present, !!h?.tts, !!h?.stt_ready];
+  const done = parts.filter(Boolean).length;
+  const allDone = done === parts.length;
+  const progress = Math.min(1, (done + (pulling ? pullPct * 0.95 : 0)) / parts.length);
 
-  const done = steps.filter((s) => s.state === "done").length;
-  const progress = Math.min(1, (done + (pulling ? pullPct * 0.9 : 0)) / steps.length);
-  const allDone = done === steps.length;
-  const current = steps.find((s) => s.state !== "done");
+  let status: Status;
+  if (!h) {
+    status =
+      engineDown > ENGINE_GIVE_UP
+        ? { title: "앱이 제대로 켜지지 않았어요", note: "앱을 완전히 종료했다가 다시 열어 주세요.", blocked: true }
+        : { title: "면접실을 여는 중이에요" };
+  } else if (!h.ollama) {
+    status = {
+      title: "면접관을 움직일 무료 프로그램이 필요해요",
+      note: "아래 버튼으로 내려받아 설치하고 실행하면, 이 화면이 알아서 이어서 준비해요.",
+      action: { label: "설치 프로그램 받기", run: () => open("https://ollama.com/download") },
+      blocked: true,
+    };
+  } else if (!h.model_present) {
+    status =
+      h.pull.status === "error"
+        ? {
+            title: "면접관을 준비하다 멈췄어요",
+            note: "인터넷 연결을 확인하고 다시 시도해 주세요.",
+            action: { label: "다시 시도", run: requestPull },
+            blocked: true,
+          }
+        : {
+            title: "면접관을 처음 준비하고 있어요",
+            note: h.pull.total
+              ? `처음 한 번만 받아요 · ${gb(h.pull.completed)} / ${gb(h.pull.total)}GB`
+              : "처음 한 번만 받아요. 다음부터는 몇 초면 켜져요.",
+          };
+  } else if (!h.tts) {
+    status = { title: "면접관 목소리를 준비하고 있어요", note: "처음 한 번만 받아요. 다음부터는 몇 초면 켜져요." };
+  } else if (!h.stt_ready) {
+    status = { title: "내 답변을 알아들을 준비를 하고 있어요", note: "처음 한 번만 몇 분 걸릴 수 있어요." };
+  } else {
+    status = { title: "준비됐어요" };
+  }
 
   useEffect(() => {
     if (allDone && !readySent.current) {
@@ -134,42 +117,44 @@ export function SplashScreen({ onReady }: Props) {
   }, [allDone, onReady]);
 
   return (
-    <div className="splash">
-      <div className="splash-inner">
-        <h1 className="splash-title">모의 면접</h1>
-        <p className="splash-sub">이력서와 답변은 이 맥 밖으로 나가지 않아요.</p>
-
-        <div className="splash-bar" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(progress * 100)}>
-          <span style={{ width: `${progress * 100}%` }} />
-        </div>
-        <p className="splash-now" aria-live="polite">
-          {allDone ? "준비됐어요" : current ? `${current.label}${current.state === "blocked" ? "에 도움이 필요해요" : " 중…"}` : ""}
-        </p>
-
-        <ol className="splash-steps">
-          {steps.map((s) => (
-            <li key={s.key} className={s.state}>
-              <span className="mark" aria-hidden>
-                {s.state === "done" ? "✓" : s.state === "blocked" ? "!" : ""}
-              </span>
-              <div>
-                <div className="label">{s.label}</div>
-                {s.detail && <div className="detail">{s.detail}</div>}
-                {s.action && (
-                  <button className="btn" onClick={s.action.run}>
-                    {s.action.label}
-                  </button>
-                )}
+    <div className="screen">
+      <main className="page center">
+        <div style={{ display: "flex", flexDirection: "column", alignItems: "center", width: "100%" }}>
+          <section className="splash-card glass" aria-live="polite">
+            <div className={`title ${status.blocked ? "blocked" : ""}`}>
+              <span>{status.title}</span>
+              {!status.blocked && <span className="pct num">{Math.round(progress * 100)}%</span>}
+            </div>
+            <div
+              className={`bar ${status.blocked ? "paused" : ""}`}
+              role="progressbar"
+              aria-label="준비 진행률"
+              aria-valuemin={0}
+              aria-valuemax={100}
+              aria-valuenow={Math.round(progress * 100)}
+            >
+              <span style={{ width: `${Math.max(progress, 0.03) * 100}%` }} />
+            </div>
+            {status.note && <p className="muted" style={{ fontSize: 14 }}>{status.note}</p>}
+            {status.action && (
+              <div style={{ marginTop: 8 }}>
+                <button className="btn btn-primary" onClick={status.action.run}>
+                  {status.action.label}
+                </button>
               </div>
-            </li>
-          ))}
-        </ol>
-        {import.meta.env.DEV && !h && engineDown > 3 && (
-          <p className="splash-dev">
-            개발 모드: <code>cd backend && uv run python -m interview_agent</code> ({BASE})
+            )}
+            {import.meta.env.DEV && !h && engineDown > 3 && (
+              <p className="sub small">
+                개발 모드: <code>cd backend && uv run python -m interview_agent</code> ({BASE})
+              </p>
+            )}
+          </section>
+          <p className="privacy">
+            <Icon.lock />
+            이력서와 답변은 밖으로 나가지 않아요
           </p>
-        )}
-      </div>
+        </div>
+      </main>
     </div>
   );
 }

@@ -34,7 +34,8 @@ class FakeSTT:
     def __init__(self, texts=None):
         self.texts = list(texts or [])
 
-    async def transcribe(self, wav: bytes) -> str:
+    async def transcribe(self, wav: bytes, hint: str = "") -> str:
+        self.hints = [*getattr(self, "hints", []), hint]
         return self.texts.pop(0) if self.texts else "네, 답변입니다."
 
 
@@ -42,7 +43,14 @@ class FakeTTS:
     def available(self) -> bool:
         return True
 
-    async def synthesize(self, text: str) -> tuple[bytes, str]:
+    def __init__(self):
+        self.voices: list[str | None] = []
+
+    def voice_for(self, session_id: str) -> str:
+        return "M3"
+
+    async def synthesize(self, text: str, voice: str | None = None) -> tuple[bytes, str]:
+        self.voices.append(voice)
         return b"RIFF" + text.encode(), "audio/wav"
 
 

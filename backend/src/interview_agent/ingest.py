@@ -7,6 +7,7 @@ import trafilatura
 from pypdf import PdfReader
 
 MIN_JOB_CHARS = 200
+MIN_LINK_CHARS = 50
 _UA = "interview-agent/0.1 (local mock interview app)"
 
 
@@ -30,6 +31,15 @@ def extract_text(filename: str, data: bytes) -> str:
 
 
 async def fetch_job_posting(url: str, client: httpx.AsyncClient | None = None) -> str | None:
+    return await fetch_page(url, MIN_JOB_CHARS, client)
+
+
+async def fetch_link(url: str, client: httpx.AsyncClient | None = None) -> str | None:
+    """A user's own page (GitHub, blog, portfolio). Shorter pages are still useful context."""
+    return await fetch_page(url, MIN_LINK_CHARS, client)
+
+
+async def fetch_page(url: str, min_chars: int, client: httpx.AsyncClient | None = None) -> str | None:
     own = client is None
     client = client or httpx.AsyncClient(timeout=15, follow_redirects=True, headers={"User-Agent": _UA})
     try:
@@ -43,8 +53,12 @@ async def fetch_job_posting(url: str, client: httpx.AsyncClient | None = None) -
         if own:
             await client.aclose()
     text = text.strip()
-    return text if len(text) >= MIN_JOB_CHARS else None
+    return text if len(text) >= min_chars else None
 
 
 def combine_sources(items: list[tuple[str, str]]) -> str:
-    return "\n\n".join(f"### 파일: {name}\n{text.strip()}" for name, text in items if text.strip())
+    """items: (name, text); names that are URLs are labelled as links."""
+    def label(name: str) -> str:
+        return f"링크: {name}" if name.startswith(("http://", "https://")) else f"파일: {name}"
+
+    return "\n\n".join(f"### {label(name)}\n{text.strip()}" for name, text in items if text.strip())

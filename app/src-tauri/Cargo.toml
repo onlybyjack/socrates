@@ -1,7 +1,7 @@
 [package]
-name = "app"
+name = "socrates"
 version = "0.1.0"
-description = "A Tauri App"
+description = "socrates — local mock interview"
 authors = ["you"]
 edition = "2024"
 
@@ -31,3 +31,8 @@ lto = true
 opt-level = 3
 panic = "abort"
 strip = true
+
+# Native window chrome tweaks (empty unified toolbar → full-size macOS window controls).
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6"
+objc2-app-kit = { version = "0.3", features = ["NSToolbar", "NSWindow", "NSResponder"] }

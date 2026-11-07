@@ -1,11 +1,10 @@
-export type Stage = "intro" | "motivation" | "experience" | "technical" | "reverse_qa" | "closing";
+export type Stage = "intro" | "motivation" | "experience" | "technical" | "closing";
 
 export const STAGES: { key: Stage; label: string }[] = [
   { key: "intro", label: "자기소개" },
   { key: "motivation", label: "지원 동기" },
   { key: "experience", label: "경력·경험" },
   { key: "technical", label: "직무·기술" },
-  { key: "reverse_qa", label: "역질문" },
   { key: "closing", label: "마무리" },
 ];
 
@@ -43,6 +42,7 @@ export interface Plan {
 export interface CreateSessionResult {
   session_id: string;
   files: { name: string; chars: number }[];
+  links: { url: string; chars: number }[];
   job_text_ok: boolean;
   job_chars: number;
 }
@@ -60,6 +60,13 @@ export interface Turn {
   created_at: string;
 }
 
+export type ReportStatus = "none" | "running" | "done" | "error";
+
+export interface ReportJob {
+  status: ReportStatus;
+  message: string;
+}
+
 export interface SessionDetail {
   id: string;
   created_at: string;
@@ -68,6 +75,7 @@ export interface SessionDetail {
   plan: Plan | null;
   report: Report | null;
   turns: Turn[];
+  report_status: ReportJob;
 }
 
 export interface SessionSummary {
@@ -76,6 +84,8 @@ export interface SessionSummary {
   company: string;
   role: string;
   has_report: boolean;
+  has_analysis: boolean;
+  report_status: ReportStatus;
 }
 
 export type ServerEvent =

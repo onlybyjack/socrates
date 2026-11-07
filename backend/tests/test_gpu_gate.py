@@ -50,7 +50,7 @@ async def test_stt_uses_shared_gate():
     seen = []
 
     class Probe(MlxWhisperSTT):
-        def _run(self, audio):
+        def _run(self, audio, hint=""):
             seen.append(lock.locked())
             return "답변입니다"
 

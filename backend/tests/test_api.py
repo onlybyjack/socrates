@@ -50,6 +50,50 @@ def test_create_session_unsupported_file(tmp_path):
     assert r.status_code == 400
 
 
+def test_create_session_reads_links_with_files(tmp_path, monkeypatch):
+    seen = []
+
+    async def fake_fetch(url):
+        seen.append(url)
+        return "깃허브 프로필: 결제 서버 오픈소스 기여" if "github" in url else None
+
+    monkeypatch.setattr("interview_agent.api.fetch_link", fake_fetch)
+    c, store = make_client(tmp_path)
+    r = c.post(
+        "/api/sessions",
+        files=[("files", ("a.txt", "이력서 내용".encode(), "text/plain"))],
+        data={"job_text": "공고", "links": ["https://github.com/me", "https://broken.example"]},
+    )
+    body = r.json()
+    assert r.status_code == 200
+    assert seen == ["https://github.com/me", "https://broken.example"]
+    assert body["links"] == [{"url": "https://github.com/me", "chars": 22}, {"url": "https://broken.example", "chars": 0}]
+    src = store.get_session(body["session_id"])["source_text"]
+    assert "### 파일: a.txt" in src and "### 링크: https://github.com/me" in src and "broken" not in src
+
+
+def test_create_session_links_only(tmp_path, monkeypatch):
+    async def fake_fetch(url):
+        return "포트폴리오 본문입니다"
+
+    monkeypatch.setattr("interview_agent.api.fetch_link", fake_fetch)
+    c, _ = make_client(tmp_path)
+    r = c.post("/api/sessions", data={"job_text": "공고", "links": ["https://me.dev"]})
+    assert r.status_code == 200
+
+
+def test_create_session_needs_a_source_and_valid_links(tmp_path, monkeypatch):
+    async def none(url):
+        return None
+
+    monkeypatch.setattr("interview_agent.api.fetch_link", none)
+    c, _ = make_client(tmp_path)
+    assert c.post("/api/sessions", data={"job_text": "공고"}).status_code == 400
+    assert c.post("/api/sessions", data={"job_text": "공고", "links": ["ftp://x"]}).status_code == 400
+    r = c.post("/api/sessions", data={"job_text": "공고", "links": ["https://dead.example"]})
+    assert r.status_code == 400 and "링크" in r.json()["detail"]
+
+
 def test_create_session_with_job_text(tmp_path):
     c, store = make_client(tmp_path)
     r = c.post(
@@ -165,9 +209,34 @@ def test_ws_end_interview_generates_report(tmp_path):
             m = ws.receive_json()
             if m["type"] == "finished":
                 break
+    assert _wait_report(c, sid)["status"] == "done"
     rep = store.get_session(sid)["report"]
     assert rep["overall"]["summary"] == "총평"
     assert rep["questions"][0]["answer"] == "저는 개발자입니다."
+
+
+def _wait_report(c, sid):
+    import time
+
+    for _ in range(200):
+        body = c.get(f"/api/sessions/{sid}/report/status").json()
+        if body["status"] != "running":
+            return body
+        time.sleep(0.01)
+    raise AssertionError(body)
+
+
+def test_report_builds_in_background(tmp_path):
+    llm = FakeLLM(json_responses=[{"overall": {"summary": "총평"}}])
+    c, store = make_client(tmp_path, llm=llm)
+    sid = ready_session(store)
+    store.add_turn(sid, "interviewer", "자기소개 부탁드려요.", "intro", "main")
+    store.add_turn(sid, "candidate", "저는 백엔드 개발자입니다.", "intro", "answer")
+    assert c.get(f"/api/sessions/{sid}/report/status").json()["status"] == "none"
+    r = c.post(f"/api/sessions/{sid}/report")
+    assert r.status_code == 202 and r.json()["status"] == "running"
+    assert _wait_report(c, sid)["status"] == "done"
+    assert c.get(f"/api/sessions/{sid}").json()["report"]["overall"]["summary"] == "총평"
 
 
 def test_ws_not_analyzed_errors(tmp_path):
@@ -179,7 +248,7 @@ def test_ws_not_analyzed_errors(tmp_path):
 
 
 class BoomSTT(FakeSTT):
-    async def transcribe(self, wav):
+    async def transcribe(self, wav, hint=""):
         raise RuntimeError("mlx exploded")
 
 
@@ -213,13 +282,11 @@ def test_ws_report_failure_still_finishes(tmp_path):
         _drain_turn(ws)
         ws.send_json({"type": "end_interview"})
         _drain_turn(ws)
-        types = []
-        while True:
-            m = ws.receive_json()
-            types.append(m["type"])
-            if m["type"] == "finished":
-                break
-        assert "error" in types
+        while ws.receive_json()["type"] != "finished":
+            pass
+    st = _wait_report(c, sid)
+    assert st["status"] == "error" and "unexpected" in st["message"]
+    assert c.get("/api/sessions").json()[0]["report_status"] == "error"
 
 
 def _wait_pull(c, want):
@@ -254,3 +321,24 @@ def test_model_pull_failure_is_reported(tmp_path):
     c.post("/api/model/pull")
     body = _wait_pull(c, "error")
     assert "disk full" in body["pull"]["message"]
+
+
+def test_retry_copies_materials_and_analysis_without_turns(tmp_path):
+    c, store = make_client(tmp_path)
+    sid = ready_session(store)
+    store.add_turn(sid, "interviewer", "질문", "intro", "question")
+    store.update_session(sid, report={"summary": "x"})
+    r = c.post(f"/api/sessions/{sid}/retry")
+    assert r.status_code == 200
+    new = r.json()["session_id"]
+    assert new != sid and r.json()["analysis"] == ANALYSIS_JSON
+    s = store.get_session(new)
+    assert s["plan"] == PLAN_JSON and s["job_text"] == "공고" and s["source_text"] == "이력서"
+    assert s["report"] is None and store.get_turns(new) == []
+
+
+def test_retry_needs_analysis(tmp_path):
+    c, store = make_client(tmp_path)
+    sid = store.create_session("이력서", None, "공고")
+    assert c.post(f"/api/sessions/{sid}/retry").status_code == 409
+    assert c.post("/api/sessions/nope/retry").status_code == 404

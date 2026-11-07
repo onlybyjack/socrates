@@ -3,26 +3,36 @@ import sys
 import pytest
 
 from interview_agent.stt import is_hallucination
-from interview_agent.tts import MacSayTTS
+from interview_agent.tts import SupertonicTTS, pick_voice, to_wav
 
 
-@pytest.mark.skipif(sys.platform != "darwin", reason="macOS only")
-async def test_mac_say_produces_wav():
-    tts = MacSayTTS("Yuna")
-    assert tts.available()
-    audio, mime = await tts.synthesize("안녕하세요.")
-    assert mime == "audio/wav"
-    assert audio[:4] == b"RIFF" and len(audio) > 2000
+def test_voice_is_stable_per_session_and_both_get_used():
+    voices = ("M3", "F2")
+    assert pick_voice(voices, "abc") == pick_voice(voices, "abc")
+    picked = {pick_voice(voices, f"session-{i}") for i in range(50)}
+    assert picked == {"M3", "F2"}
 
 
-@pytest.mark.skipif(sys.platform != "darwin", reason="macOS only")
-async def test_mac_say_text_starting_with_dash_is_spoken_not_flag():
-    audio, _ = await MacSayTTS("Yuna").synthesize("-v 테스트")
-    assert audio[:4] == b"RIFF"
+def test_to_wav_is_16bit_mono():
+    import wave, io
+
+    import numpy as np
+
+    data = to_wav(np.array([[0.0, 0.5, -0.5, 2.0]], dtype=np.float32), 44100)
+    with wave.open(io.BytesIO(data)) as w:
+        assert (w.getnchannels(), w.getsampwidth(), w.getframerate(), w.getnframes()) == (1, 2, 44100, 4)
 
 
-def test_unknown_voice_not_available():
-    assert MacSayTTS("NoSuchVoice123").available() is False
+def test_not_available_until_loaded():
+    assert SupertonicTTS().available() is False
+
+
+@pytest.mark.skipif(sys.platform != "darwin", reason="downloads the model; run on the dev Mac")
+async def test_supertonic_speaks_korean():
+    tts = SupertonicTTS()
+    audio, mime = await tts.synthesize("안녕하세요.", "F2")
+    assert mime == "audio/wav" and tts.available()
+    assert audio[:4] == b"RIFF" and len(audio) > 20000
 
 
 def test_hallucination_filter():

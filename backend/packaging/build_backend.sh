@@ -10,6 +10,8 @@ uv run pyinstaller packaging/entry.py \
   --collect-all mlx_whisper \
   --collect-all trafilatura \
   --collect-all justext \
+  --collect-all supertonic \
+  --collect-all onnxruntime \
   --collect-data courlan \
   --collect-data htmldate \
   --collect-submodules uvicorn \

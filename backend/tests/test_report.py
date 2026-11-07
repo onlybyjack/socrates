@@ -57,3 +57,20 @@ def test_pair_questions_repeat_keeps_pending():
         {"role": "candidate", "text": "A1", "stage": "intro", "kind": "answer"},
     ]
     assert pair_questions(turns) == [{"question": "Q1", "answer": "A1", "kind": "main"}]
+
+
+async def test_no_praise_for_empty_answers():
+    turns = [
+        {"role": "interviewer", "text": "블록체인 경험은요?", "stage": "experience", "kind": "main"},
+        {"role": "candidate", "text": "??", "stage": "experience", "kind": "answer"},
+        {"role": "interviewer", "text": "자기소개에서 언급하셨나요?", "stage": "experience", "kind": "follow_up"},
+        {"role": "candidate", "text": "네?", "stage": "experience", "kind": "answer"},
+        {"role": "interviewer", "text": "Kafka는요?", "stage": "experience", "kind": "follow_up"},
+        {"role": "candidate", "text": "잘 모르겠습니다.", "stage": "experience", "kind": "answer"},
+    ]
+    llm = FakeLLM(json_responses=[{"questions": [
+        {"index": i, "good": "적극적인 태도를 보여주었습니다", "improve": "답이 없음"} for i in (1, 2, 3)
+    ]}])
+    rep = await make_report(llm, {}, turns)
+    assert [q["good"] for q in rep["questions"]] == ["", "", ""]
+    assert all(q["improve"] == "답이 없음" for q in rep["questions"])

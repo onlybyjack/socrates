@@ -3,6 +3,6 @@
 <plist version="1.0">
 <dict>
   <key>NSMicrophoneUsageDescription</key>
-  <string>모의 면접에서 답변을 듣고 받아쓰기 위해 마이크를 사용해요. 음성은 이 맥 밖으로 나가지 않아요.</string>
+  <string>socrates가 면접 답변을 듣고 글로 바꾸려면 마이크가 필요해요. 답변은 이 맥 밖으로 나가지 않아요.</string>
 </dict>
 </plist>

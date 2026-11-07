@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Interview Agent",
+  "productName": "socrates",
   "version": "0.1.0",
   "identifier": "dev.interview-agent.app",
   "build": {
@@ -12,11 +12,13 @@
   "app": {
     "windows": [
       {
-        "title": "모의 면접",
+        "title": "socrates",
         "width": 1200,
         "height": 820,
         "minWidth": 900,
-        "minHeight": 640
+        "minHeight": 640,
+        "titleBarStyle": "Overlay",
+        "hiddenTitle": true
       }
     ],
     "security": {
@@ -43,6 +45,6 @@
       "signingIdentity": "-",
       "minimumSystemVersion": "13.0"
     },
-    "shortDescription": "로컬 모의 면접 에이전트"
+    "shortDescription": "socrates — 질문이 답을 만드는 모의 면접"
   }
 }

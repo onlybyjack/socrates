@@ -1,6 +1,6 @@
 """End-to-end smoke test against a running backend, with real models.
 
-Uploads the fictional fixtures, analyzes, then plays two spoken answers (synthesized with macOS `say`)
+Uploads the fictional fixtures, analyzes, then plays two spoken answers (synthesized with Supertonic)
 over the interview WebSocket, ends the interview and checks the report.
 
   uv run python scripts/e2e_smoke.py [--base http://127.0.0.1:8765]
@@ -9,13 +9,13 @@ over the interview WebSocket, ends the interview and checks the report.
 import argparse
 import asyncio
 import json
-import subprocess
-import tempfile
 import time
 from pathlib import Path
 
 import httpx
 import websockets
+
+from interview_agent.tts import SupertonicTTS
 
 FIX = Path(__file__).parent / "fixtures"
 ANSWERS = [
@@ -24,13 +24,12 @@ ANSWERS = [
 ]
 
 
-def speak(text: str) -> bytes:
-    with tempfile.NamedTemporaryFile(suffix=".wav") as f:
-        subprocess.run(
-            ["say", "-v", "Yuna", "--file-format=WAVE", "--data-format=LEI16@16000", "-o", f.name],
-            input=text.encode(), check=True,
-        )
-        return Path(f.name).read_bytes()
+_tts = SupertonicTTS()
+
+
+async def speak(text: str) -> bytes:
+    audio, _ = await _tts.synthesize(text, "M3")
+    return audio
 
 
 async def main(base: str) -> None:
@@ -68,7 +67,7 @@ async def main(base: str) -> None:
                     print(f"   clips={clips} first_audio={first_audio or 0:.2f}s total={time.perf_counter() - t0:.2f}s")
                     break
             if i < len(ANSWERS):
-                await ws.send(speak(ANSWERS[i]))
+                await ws.send(await speak(ANSWERS[i]))
         await ws.send(json.dumps({"type": "end_interview"}))
         while True:
             m = await ws.recv()

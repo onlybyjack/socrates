@@ -1,6 +1,7 @@
-import type { Analysis, CreateSessionResult, Health, Plan, Report, SessionDetail, SessionSummary } from "./types";
+import type { Analysis, CreateSessionResult, Health, Plan, SessionDetail, SessionSummary, ReportJob } from "./types";
 
-export const BASE = "http://127.0.0.1:8765";
+// VITE_API_BASE lets a test run point the UI at a mock backend; the app always uses 8765.
+export const BASE: string = import.meta.env.VITE_API_BASE ?? "http://127.0.0.1:8765";
 
 export class ApiError extends Error {
   constructor(public status: number, message: string) {
@@ -37,18 +38,23 @@ const json = (body: unknown): RequestInit => ({
 export const api = {
   health: () => request<Health>("/api/health"),
   pullModel: () => request<Health["pull"]>("/api/model/pull", { method: "POST" }),
-  createSession: (files: File[], jobUrl?: string, jobText?: string) => {
+  createSession: (files: File[], links: string[], jobUrl?: string, jobText?: string) => {
     const fd = new FormData();
     files.forEach((f) => fd.append("files", f));
+    links.forEach((u) => fd.append("links", u));
     if (jobUrl) fd.append("job_url", jobUrl);
     if (jobText) fd.append("job_text", jobText);
     return request<CreateSessionResult>("/api/sessions", { method: "POST", body: fd });
   },
+  retrySession: (id: string) =>
+    request<{ session_id: string; analysis: Analysis; plan: Plan }>(`/api/sessions/${id}/retry`, { method: "POST" }),
   setJobText: (id: string, text: string) => request<{ ok: true }>(`/api/sessions/${id}/job_text`, json({ text })),
   analyze: (id: string) => request<{ analysis: Analysis; plan: Plan }>(`/api/sessions/${id}/analyze`, { method: "POST" }),
   listSessions: () => request<SessionSummary[]>("/api/sessions"),
   getSession: (id: string) => request<SessionDetail>(`/api/sessions/${id}`),
-  buildReport: (id: string) => request<Report>(`/api/sessions/${id}/report`, { method: "POST" }),
+  /** Starts building feedback in the background; poll reportStatus. */
+  buildReport: (id: string) => request<ReportJob>(`/api/sessions/${id}/report`, { method: "POST" }),
+  reportStatus: (id: string) => request<ReportJob>(`/api/sessions/${id}/report/status`),
   openInterview: (id: string) => {
     const ws = new WebSocket(BASE.replace("http", "ws") + `/ws/interview/${id}`);
     ws.binaryType = "arraybuffer";

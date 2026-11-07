@@ -12,7 +12,7 @@ from .parent_watch import watch_parent
 from .llm import GatedLLM, OllamaLLM
 from .store import Store
 from .stt import MlxWhisperSTT
-from .tts import MacSayTTS
+from .tts import SupertonicTTS
 
 
 def main() -> None:
@@ -23,7 +23,8 @@ def main() -> None:
     gpu = asyncio.Lock()  # Whisper and Ollama share the GPU; never run them at the same time
     stt = MlxWhisperSTT(s.stt_model, lock=gpu)
     llm = GatedLLM(OllamaLLM(s.ollama_url, s.llm_model), gpu)
-    app = create_app(llm, stt, MacSayTTS(s.tts_voice), Store(s.data_dir / "interview.db"))
+    tts = SupertonicTTS(s.tts_voices)
+    app = create_app(llm, stt, tts, Store(s.data_dir / "interview.db"))
 
     @app.on_event("startup")
     async def _warm() -> None:
@@ -33,7 +34,14 @@ def main() -> None:
             except Exception:
                 logging.getLogger("interview_agent").exception("STT warmup failed (will retry on first answer)")
 
+        async def run_tts() -> None:
+            try:
+                await tts.warmup()
+            except Exception:
+                logging.getLogger("interview_agent").exception("TTS warmup failed (health check retries it)")
+
         asyncio.create_task(run())
+        asyncio.create_task(run_tts())
 
     uvicorn.run(app, host="127.0.0.1", port=s.port)
 

@@ -56,6 +56,17 @@ class Store:
             )
         return sid
 
+    def clone_session(self, session_id: str) -> str | None:
+        """New session with the same materials, analysis and plan (no turns, no report)."""
+        sid = uuid.uuid4().hex
+        with self._lock, self._conn:
+            cur = self._conn.execute(
+                "INSERT INTO sessions (id, created_at, source_text, job_url, job_text, analysis, plan) "
+                "SELECT ?, ?, source_text, job_url, job_text, analysis, plan FROM sessions WHERE id=?",
+                (sid, _now(), session_id),
+            )
+        return sid if cur.rowcount else None
+
     def get_session(self, session_id: str) -> dict | None:
         with self._lock:
             row = self._conn.execute("SELECT * FROM sessions WHERE id=?", (session_id,)).fetchone()
@@ -69,7 +80,7 @@ class Store:
     def list_sessions(self) -> list[dict]:
         with self._lock:
             rows = self._conn.execute(
-                "SELECT id, created_at, analysis, report IS NOT NULL AS has_report "
+                "SELECT id, created_at, analysis, plan IS NOT NULL AS has_plan, report IS NOT NULL AS has_report "
                 "FROM sessions ORDER BY created_at DESC"
             ).fetchall()
         out = []
@@ -82,6 +93,7 @@ class Store:
                     "company": job.get("company", ""),
                     "role": job.get("role", ""),
                     "has_report": bool(r["has_report"]),
+                    "has_analysis": bool(r["analysis"]) and bool(r["has_plan"]),
                 }
             )
         return out

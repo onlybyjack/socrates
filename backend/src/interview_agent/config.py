@@ -9,7 +9,7 @@ class Settings:
     ollama_url: str
     data_dir: Path
     stt_model: str
-    tts_voice: str
+    tts_voices: tuple[str, ...]
     port: int
 
 
@@ -22,6 +22,7 @@ def get_settings() -> Settings:
             env("IA_DATA_DIR", str(Path.home() / "Library/Application Support/interview-agent"))
         ).expanduser(),
         stt_model=env("IA_STT_MODEL", "mlx-community/whisper-large-v3-turbo"),
-        tts_voice=env("IA_TTS_VOICE", "Yuna"),
+        # Supertonic voice per session, picked at random: M3 (male) / F2 (female)
+        tts_voices=tuple(v.strip() for v in env("IA_TTS_VOICES", "M3,F2").split(",") if v.strip()),
         port=int(env("IA_PORT", "8765")),
     )
