@@ -74,7 +74,12 @@ async def main(base: str) -> None:
             if not isinstance(m, bytes) and json.loads(m)["type"] == "finished":
                 break
 
+    # Feedback is built in the background after the interview ends.
     async with httpx.AsyncClient() as c:
+        t = time.perf_counter()
+        while (st := (await c.get(f"{base}/api/sessions/{sid}/report/status")).json())["status"] == "running":
+            await asyncio.sleep(1)
+        print(f"report: {st['status']} after {time.perf_counter() - t:.1f}s {st.get('message', '')}")
         rep = (await c.get(f"{base}/api/sessions/{sid}")).json()["report"]
     assert rep and rep["questions"], "report missing"
     print(f"report: {len(rep['questions'])} questions | {rep['overall']['summary'][:100]}")

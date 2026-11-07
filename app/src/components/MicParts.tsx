@@ -17,7 +17,7 @@ export function MicDenied({ onRetry }: { onRetry: () => void }) {
       <div className="callout warn">
         <Icon.warn />
         <span>
-          <strong>마이크가 꺼져 있어요.</strong> 시스템 설정 → 개인정보 보호 및 보안 → 마이크에서 ‘socrates’를 켜 주세요.
+          <strong>마이크가 꺼져 있어요.</strong> 시스템 설정 → 개인정보 보호 및 보안 → 마이크에서 ‘Socrates’를 켜 주세요.
         </span>
       </div>
       <div className="row">

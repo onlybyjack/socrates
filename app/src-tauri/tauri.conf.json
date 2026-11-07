@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "socrates",
+  "productName": "Socrates",
   "version": "0.1.0",
   "identifier": "dev.interview-agent.app",
   "build": {
@@ -12,7 +12,7 @@
   "app": {
     "windows": [
       {
-        "title": "socrates",
+        "title": "Socrates",
         "width": 1200,
         "height": 820,
         "minWidth": 900,
@@ -43,8 +43,9 @@
     },
     "macOS": {
       "signingIdentity": "-",
+      "entitlements": "Entitlements.plist",
       "minimumSystemVersion": "13.0"
     },
-    "shortDescription": "socrates — 질문이 답을 만드는 모의 면접"
+    "shortDescription": "Socrates — 내 맥 안에서만 돌아가는 AI 모의 면접관"
   }
 }

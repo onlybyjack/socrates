@@ -1,5 +1,5 @@
 
-# socrates
+# Socrates
 
 **내 맥 안에서만 돌아가는 AI 모의 면접관**
 
@@ -10,7 +10,7 @@ macOS (Apple Silicon) · 한국어 · 오프라인 · 무료
 
 ---
 
-면접 준비를 혼자 하다 보면 정작 필요한 건 "내 이력서를 읽고, 내 답을 듣고, 애매한 부분을 다시 찌르는 사람"입니다. socrates는 그 역할을 하는 데스크톱 앱입니다.
+면접 준비를 혼자 하다 보면 정작 필요한 건 "내 이력서를 읽고, 내 답을 듣고, 애매한 부분을 다시 찌르는 사람"입니다. Socrates는 그 역할을 하는 데스크톱 앱입니다.
 
 - 이력서와 지원할 공고를 넣으면 **내 이력서에서 파고들 지점**을 먼저 찾습니다.
 - 면접관이 **목소리로** 질문하고, 나는 **말로** 답합니다. 채팅으로 답해도 됩니다.
@@ -42,12 +42,12 @@ macOS (Apple Silicon) · 한국어 · 오프라인 · 무료
 
 ### 내려받기
 
-1. GitHub **Releases**에서 최신 `socrates_x.y.z_aarch64.dmg`를 받습니다.
-2. `.dmg`를 열고 socrates를 응용 프로그램 폴더로 옮깁니다.
-3. 처음 열 때 "확인되지 않은 개발자" 경고가 뜨면, socrates를 **오른쪽 클릭 → 열기**로 엽니다.
+1. GitHub **Releases**에서 최신 `Socrates_x.y.z_aarch64.dmg`를 받습니다.
+2. `.dmg`를 열고 Socrates를 응용 프로그램 폴더로 옮깁니다.
+3. 처음 열 때 "확인되지 않은 개발자" 경고가 뜨면, Socrates를 **오른쪽 클릭 → 열기**로 엽니다.
    경고가 계속되면 터미널에서 한 번 실행합니다.
    ```bash
-   xattr -dr com.apple.quarantine /Applications/socrates.app
+   xattr -dr com.apple.quarantine /Applications/Socrates.app
    ```
    (아직 Apple 공증을 받지 않은 앱이라 생기는 경고입니다.)
 4. 첫 실행 화면에서 모델을 알아서 내려받습니다. 인터넷 속도에 따라 몇 분 걸리고, 다음부터는 몇 초면 켜집니다.
@@ -187,7 +187,7 @@ PR 전에 `cd backend && uv run pytest`와 `cd app && pnpm build`가 통과하�
 
 ## 감사의 말
 
-socrates는 이 오픈소스 프로젝트들 위에 만들어졌습니다.
+Socrates는 이 오픈소스 프로젝트들 위에 만들어졌습니다.
 
 - [Qwen3](https://github.com/QwenLM/Qwen3) (Apache 2.0) · [Ollama](https://github.com/ollama/ollama)
 - [Whisper](https://github.com/openai/whisper) (MIT) · [mlx-whisper](https://github.com/ml-explore/mlx-examples)
