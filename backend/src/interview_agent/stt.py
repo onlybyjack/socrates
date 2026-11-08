@@ -57,40 +57,57 @@ class STT(Protocol):
     async def transcribe(self, wav: bytes, hint: str = "") -> str: ...
 
 
-# Terms Whisper tends to spell phonetically in Korean speech ("제미나", "패스트잎").
-_BASE_TERMS = [
-    "Python", "Java", "TypeScript", "FastAPI", "Spring", "React", "Next.js", "Node.js",
-    "LLM", "Gemini", "OpenAI", "GPT", "Claude", "Whisper", "STT", "TTS", "RAG",
-    "API", "REST", "GraphQL", "Docker", "Kubernetes", "AWS", "GCP", "Kafka", "Redis",
-    "PostgreSQL", "MySQL", "MongoDB",
-]
 _MAX_HINT_CHARS = 300  # Whisper's prompt window is ~224 tokens; keep it well under
+_MAX_TERMS = 80
+# Names: a capital, a digit or a symbol somewhere (Python, GA4, Next.js, iOS, C++); plain lowercase prose is skipped.
+_NAME_RE = re.compile(r"[A-Za-z][A-Za-z0-9.+#/-]{0,30}[A-Za-z0-9+#]")
+_PHRASE_RE = re.compile(r"[A-Za-z][A-Za-z0-9.+#/-]*(?: [A-Za-z0-9.+#/-]+){1,2}")
+_STOP = {"I", "We", "The", "This", "That", "And", "For", "With", "In", "On", "At", "To", "Of", "A", "An", "My", "Our"}
 
 
-def vocabulary_terms(analysis: dict | None) -> list[str]:
-    """Tech terms from the candidate's materials and the job posting first, then common ones."""
+def _names(text: str) -> list[str]:
+    out = []
+    for w in _NAME_RE.findall(text or ""):
+        w = w.rstrip(".")
+        if w in _STOP or len(w) < 2:
+            continue
+        if any(c.isupper() or c.isdigit() or c in "+#." for c in w):
+            out.append(w)
+    return out
+
+
+def vocabulary_terms(analysis: dict | None, *texts: str) -> list[str]:
+    """Names that appear in *this* candidate's materials and job posting (any profession: Figma, Jira,
+    Salesforce, Kafka...). No built-in list, so a designer's interview isn't steered toward dev tools."""
     analysis = analysis or {}
     job = analysis.get("job") or {}
     cand = analysis.get("candidate") or {}
-    found: list[str] = []
+    ranked: list[str] = []
     for item in [*(cand.get("skills") or []), *(job.get("required") or []), *(job.get("preferred") or [])]:
-        for word in re.findall(r"[A-Za-z][A-Za-z0-9.+#/-]{1,30}", str(item)):
-            found.append(word)
+        item = str(item).strip()
+        # "Looker Studio" is one name; split only items mixed with prose ("Jira 사용 경험").
+        ranked += [item] if _PHRASE_RE.fullmatch(item) and " " in item else _names(item)
+    counts: dict[str, int] = {}
+    for t in texts:
+        for w in _names(t):
+            counts[w] = counts.get(w, 0) + 1
+    ranked += sorted(counts, key=lambda w: -counts[w])
     terms, seen = [], set()
-    for t in [*found, *_BASE_TERMS]:
+    for t in ranked:
         if t.lower() not in seen:
             seen.add(t.lower())
             terms.append(t)
-    return terms
+    return terms[:_MAX_TERMS]
 
 
-def vocabulary_hint(analysis: dict | None) -> str:
-    """Whisper `initial_prompt`: the candidate's and the job's own tech terms, so they are written correctly."""
-    terms = vocabulary_terms(analysis)
-    head = "개발자 기술 면접 답변입니다. 용어: "
+def vocabulary_hint(terms: list[str]) -> str:
+    """Whisper `initial_prompt` listing the candidate's own terms; empty when there are none."""
+    if not terms:
+        return ""
+    head = "면접 답변입니다. 나올 수 있는 이름: "
     out = head
     for t in terms:
-        nxt = f"{out}{t}, " if out != head else f"{out}{t}, "
+        nxt = f"{out}{t}, "
         if len(nxt) > _MAX_HINT_CHARS:
             break
         out = nxt

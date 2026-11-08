@@ -97,12 +97,12 @@ REPORT_SYSTEM = """당신은 20년 경력의 시니어 면접관입니다. 방�
 
 
 # English on purpose: qwen3:8b infers phonetic tech names far better from an English instruction.
-TERM_FIX_SYSTEM = """You fix speech-to-text errors in a Korean developer's interview answer. Output JSON only.
-Korean STT often writes tech/product/company names phonetically in Hangul, sometimes slightly wrong. For each such word, say it aloud and think which real tool/library/service a developer would mean (e.g. 센터리 sounds like "Sentry", an error monitoring tool; 셀러리 sounds like "Celery", a Python task queue).
-If a list of likely terms is given, prefer a term from it when the sound matches (제미나 → Gemini); otherwise use your own knowledge.
-"meant" must be the real official spelling (Gemini, not Jemini). Only list words you are confident about. Do not touch ordinary Korean words.
-"odd" is true when the Hangul is NOT the usual way Koreans write that name (센터리 for Sentry, 패스트잎 for FastAPI), false when it is the normal spelling (파이썬, 슬랙, 레디스, 쿠버네티스).
-Output: {"fixes": [{"heard": "<exactly as written>", "meant": "<official name>", "odd": true|false}]}"""
+TERM_FIX_SYSTEM = """You fix speech-to-text errors in a Korean job-interview answer (any profession). Output JSON only.
+Korean STT writes names of tools, products, services and companies phonetically in Hangul, sometimes slightly wrong.
+You get a "Names list" taken from this candidate's resume and the job posting. For each Hangul word in the answer that, said aloud, sounds like a name on that list (e.g. 센터리 -> Sentry, 피그마 -> Figma, 세일즈포스 -> Salesforce), map it to that name.
+"meant" must be copied exactly from the Names list. Never use a name that is not on the list. Do not touch ordinary Korean words. If nothing matches, return an empty list.
+"odd" is true when the Hangul is NOT the usual way Koreans write that name (센터리 for Sentry), false when it is the normal spelling (피그마, 슬랙, 파이썬).
+Output: {"fixes": [{"heard": "<exactly as written>", "meant": "<name from the list>", "odd": true|false}]}"""
 
 # Said by the app itself (an 8B model ignores "say this first" memos); no particle, so no 를/을 guessing.
 TERM_CONFIRM_SAY = "{meant} 말씀하신 거군요. "

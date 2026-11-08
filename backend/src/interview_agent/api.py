@@ -248,8 +248,9 @@ def create_app(llm: LLM, stt: STT, tts: TTSEngine, store: Store) -> FastAPI:
         orch = Orchestrator(llm, s["analysis"], s["plan"])
         voice = tts.voice_for(sid)  # random interviewer (male/female) per session
         confirmed_terms: set[str] = set()
-        hint = vocabulary_hint(s["analysis"])
-        vocab = vocabulary_terms(s["analysis"])  # helps Whisper spell tech terms (Gemini, FastAPI...)
+        # Names from this candidate's own materials and job posting: Whisper hint + STT term fixing.
+        vocab = vocabulary_terms(s["analysis"], s.get("source_text") or "", s.get("job_text") or "")
+        hint = vocabulary_hint(vocab)  # helps Whisper spell tech terms (Gemini, FastAPI...)
         send_lock = asyncio.Lock()
 
         async def send_json(obj: dict) -> None:
