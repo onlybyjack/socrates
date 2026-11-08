@@ -46,6 +46,6 @@
       "entitlements": "Entitlements.plist",
       "minimumSystemVersion": "13.0"
     },
-    "shortDescription": "Socrates — 내 맥 안에서만 돌아가는 AI 모의 면접관"
+    "shortDescription": "Socrates — 내 맥 안에서만 돌아가는 AI 모의 면접 에이전트"
   }
 }
