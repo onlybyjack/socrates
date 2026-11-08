@@ -172,7 +172,7 @@ flowchart LR
 <details>
 <summary><b>영어 면접도 되나요?</b></summary>
 
-지금은 한국어 면접만 지원합니다. 다른 언어 지원은 로드맵에 있습니다.
+지금은 한국어 면접만 지원합니다.
 </details>
 
 <details>
@@ -237,15 +237,6 @@ backend/    FastAPI 백엔드, tests/, packaging/ (PyInstaller)
 scripts/    .dmg 빌드 스크립트
 ```
 </details>
-
-## 🗺 로드맵
-
-- [ ] 면접 길이 선택 (짧게 · 보통 · 길게)
-- [ ] 직무별 면접 흐름 (프론트엔드, 데이터, 디자인, PM)
-- [ ] 더 큰 모델 선택 (Qwen3-14B 등)
-- [ ] 피드백 생성 중에도 면접 질문 먼저 처리
-- [ ] 영어 면접
-- [ ] Apple 공증
 
 ## 🤝 기여하기
 
